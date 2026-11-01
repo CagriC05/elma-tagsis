@@ -1,7 +1,7 @@
 """Seçilen konfigürasyonları tüm eğitim verisiyle yeniden kurar ve docs/model.json'a yazar.
 
 Her model doğrusal cebirle (numpy) tahmin edilebilecek parametrelere indirgenir; JS tarafı (docs/engine.js)
-bunların birebir karşılığıdır. Doğrulama için docs/test_ref.json'a örnek spektrumlar ve beklenen çıktılar yazılır.
+bunların birebir karşılığıdır. Doğrulama için results/test_ref.json'a örnek spektrumlar ve beklenen çıktılar yazılır.
 """
 import datetime
 import json
