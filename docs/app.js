@@ -172,7 +172,9 @@
   }
 
   const verdictTag = x => x.verdict === "reddedildi" ? '<span class="tag rej">Reddedildi</span>'
-    : x.verdict === "tagsisli" ? '<span class="tag bad">Tağşişli</span>' : '<span class="tag ok">Otantik</span>';
+    : x.verdict === "tagsisli" ? '<span class="tag bad">Tağşişli</span>' : x.verdict === "supheli" ? '<span class="tag err">Şüpheli</span>'
+    : '<span class="tag ok">Otantik</span>';
+  const adulterLike = x => x.verdict === "tagsisli" || x.verdict === "supheli";
 
   function render() {
     const tb = $("#results tbody");
@@ -180,8 +182,8 @@
     if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" class="muted">Henüz dosya yüklenmedi.</td></tr>'; return; }
     tb.innerHTML = rows.map((r, i) => {
       if (r.error) return `<tr data-i="${i}"><td>${esc(r.name)}</td><td><span class="tag err">Hata</span></td><td></td><td></td><td class="warn">${esc(r.error)}</td></tr>`;
-      const x = r.res, adult = x.verdict === "tagsisli";
-      const lvl = adult ? `${fmt(x.level)} <span class="muted">± ${fmt(x.interval)}</span>` : "";
+      const x = r.res, adult = adulterLike(x);
+      const lvl = adult ? `${x.verdict === "supheli" ? "~" : ""}${fmt(x.level)} <span class="muted">± ${fmt(x.interval)}</span>` : "";
       const info = x.verdict === "reddedildi" ? `<span class="warn">${esc(x.rejectReasons[0])}${x.rejectReasons.length > 1 ? ` (+${x.rejectReasons.length - 1})` : ""}</span>`
         : x.warnings.length ? `<span class="warn">${x.warnings.length} uyarı</span>` : "";
       return `<tr data-i="${i}"><td>${esc(r.name)}</td><td>${verdictTag(x)}</td>` +
@@ -201,7 +203,7 @@
     return x.steps.map(s => {
       const t = MODEL.tasks[s.node], c = t.config;
       let val;
-      if (s.node === "T1_otantik") val = `f/f<sub>kritik</sub> = ${s.value.toFixed(3)} → ${s.value <= 1 ? "kabul (otantik)" : "red (tağşişli)"}`;
+      if (s.node === "T1_otantik") val = `f/f<sub>kritik</sub> = ${s.value.toFixed(3)} → ${s.value > 1 ? "red (tağşişli)" : s.suspect && s.value > s.suspect ? `şüpheli (şüphe eşiği ${s.suspect.toFixed(2)})` : "kabul (otantik)"}`;
       else if (t.kind === "clf") val = `skor = ${s.value.toFixed(3)}${s.low ? ' <span class="warn">düşük güven</span>' : ""}`;
       else val = `tahmin = %${s.value.toFixed(2)}`;
       return `<li><b>${NODE[s.node]}</b>${val}<br><small>${MODEL_NAME[c.model]} · ${c.region} cm⁻¹ · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</small></li>`;
@@ -222,6 +224,7 @@
   function verdictHTML(x) {
     if (x.verdict === "reddedildi") return `<div class="big" style="color:var(--rej)">Ölçüm reddedildi</div><div class="muted">Sonuç verilmedi. Numuneyi yeniden ölçün.</div>`;
     if (x.verdict === "tagsisli") return `<div class="big" style="color:var(--bad)">${esc(x.label)}</div><div>Tahmini oran: <b>%${fmt(x.level)}</b> <span class="muted">(± ${fmt(x.interval)}, %95 aralık)</span></div>`;
+    if (x.verdict === "supheli") return `<div class="big" style="color:var(--warn)">Şüpheli</div><div>Olası: <b>${esc(x.label.replace("Şüpheli: olası ", ""))}</b>, ~%${fmt(x.level)} <span class="muted">(± ${fmt(x.interval)})</span></div><div class="muted">Doğrulayıcı analiz önerilir.</div>`;
     return `<div class="big" style="color:var(--good)">Otantik</div><div class="muted">Tağşiş, yöntemin tespit sınırının altında</div>`;
   }
 
@@ -299,18 +302,18 @@
     const summary = rows.map(r => {
       if (r.error) return `<tr><td>${esc(r.name)}</td><td>Hata</td><td colspan="3">${esc(r.error)}</td></tr>`;
       const x = r.res;
-      return `<tr><td>${esc(r.name)}</td><td>${verdictTag(x)}</td><td>${x.verdict === "tagsisli" ? esc(x.label) + (x.lowConfidence ? " (düşük güven)" : "") : ""}</td>` +
-        `<td class="num">${x.verdict === "tagsisli" ? `%${fmt(x.level)} ± ${fmt(x.interval)}` : ""}</td>` +
+      return `<tr><td>${esc(r.name)}</td><td>${verdictTag(x)}</td><td>${adulterLike(x) ? esc(x.label) + (x.lowConfidence ? " (düşük güven)" : "") : ""}</td>` +
+        `<td class="num">${adulterLike(x) ? `%${fmt(x.level)} ± ${fmt(x.interval)}` : ""}</td>` +
         `<td>${x.verdict === "reddedildi" ? esc(x.rejectReasons.join("; ")) : x.warnings.length ? x.warnings.length + " uyarı" : "—"}</td></tr>`;
     }).join("");
     const details = rows.filter(r => !r.error).map(r => {
       const x = r.res;
-      return `<div class="sample"><h3>${esc(r.name)} — ${verdictTag(x)} ${x.verdict === "tagsisli" ? esc(x.label) + ` %${fmt(x.level)} ± ${fmt(x.interval)}` : ""}</h3>` +
+      return `<div class="sample"><h3>${esc(r.name)} — ${verdictTag(x)} ${adulterLike(x) ? esc(x.label) + ` %${fmt(x.level)} ± ${fmt(x.interval)}` : ""}</h3>` +
         `<p class="small">${metaHTML(r.meta)}</p>` +
         (x.verdict !== "reddedildi" ? `<table><thead><tr><th>Karar düğümü</th><th>Sonuç</th><th>Model</th></tr></thead><tbody>` +
           x.steps.map(s => {
             const c = MODEL.tasks[s.node].config, k = MODEL.tasks[s.node].kind;
-            const v = s.node === "T1_otantik" ? `f/f_kritik = ${s.value.toFixed(3)} (${s.value <= 1 ? "kabul" : "red"})` : k === "clf" ? `skor ${s.value.toFixed(3)}${s.low ? " · düşük güven" : ""}` : `%${s.value.toFixed(2)}`;
+            const v = s.node === "T1_otantik" ? `f/f_kritik = ${s.value.toFixed(3)} (${s.value > 1 ? "red" : s.suspect && s.value > s.suspect ? "şüpheli" : "kabul"})` : k === "clf" ? `skor ${s.value.toFixed(3)}${s.low ? " · düşük güven" : ""}` : `%${s.value.toFixed(2)}`;
             return `<tr><td>${NODE[s.node]}</td><td>${v}</td><td class="small">${MODEL_NAME[c.model]} · ${c.region} · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</td></tr>`;
           }).join("") + "</tbody></table>" : "") +
         `<p class="small"><b>Ölçüm kontrolü:</b> ${x.qc.filter(c => c.level === "ok").length}/${x.qc.length} uygun` +
@@ -321,7 +324,7 @@
       <h1>Elma Konsantresi Tağşiş Tespiti — Analiz Raporu</h1>
       <div class="meta"><div><b>Rapor tarihi:</b> ${esc(now)}</div><div><b>Analizi yapan:</b> ${esc($("#analyst").value || "—")}</div>
         <div><b>Model sürümü:</b> ${esc(MODEL.version)} (${esc(MODEL_INFO.source)})</div><div><b>Not:</b> ${esc($("#note").value || "—")}</div>
-        <div><b>Spektrum sayısı:</b> ${rows.length} (otantik ${count("otantik")}, tağşişli ${count("tagsisli")}, reddedilen ${count("reddedildi")})</div></div>
+        <div><b>Spektrum sayısı:</b> ${rows.length} (otantik ${count("otantik")}, şüpheli ${count("supheli")}, tağşişli ${count("tagsisli")}, reddedilen ölçüm ${count("reddedildi")})</div></div>
       <h2>Özet</h2>
       <table><thead><tr><th>Dosya</th><th>Karar</th><th>Tür</th><th class="num">Oran</th><th>Uyarı / red nedeni</th></tr></thead><tbody>${summary}</tbody></table>
       <h2>Numune ayrıntıları</h2>${details}
@@ -357,7 +360,7 @@
           return `<td class="num">${v === null || v === undefined ? "" : Math.round(v * 100) + "%"}</td>`;
         }).join("")}</tr>`).join("") + "</tbody>";
     };
-    heat(m.validation && m.validation.t1_seviye_red, "#m-t1");
+    heat(m.validation && (m.validation.t1_seviye_red_supheli_dahil || m.validation.t1_seviye_red), "#m-t1");
     heat(m.validation && m.validation.uctan_uca_dogruluk, "#m-e2e");
     if (m.qc) {
       const a = m.qc.acquisition, s = m.qc.spectral, f = v => Number(v).toFixed(3);
@@ -378,7 +381,7 @@
       "Her spektrum önce ölçüm uygunluk kontrolünden geçer: .spa başlığındaki parametreler (veri birimi, çözünürlük, tarama sayısı, aksesuar, arka plan yaşı) ve spektral metrikler (gürültü, kristal teması, baz çizgisi) eğitim verisinin profiliyle karşılaştırılır; uygunsuz ölçümler reddedilir ve sonuç verilmez.",
       "Her karar düğümü için ön işleme (bölge × SNV/MSC/EMSC × Savitzky-Golay türevleri) ve teknik (DD-SIMCA, PLS, PLS-DA, PCA-LDA, ridge, RBF çekirdek, kNN, MLP, 1D-CNN) kombinasyonları tarandı; seçim aile bazlı (leave-one-family-out) çapraz doğrulama ve 1-SE kuralıyla yapıldı.",
       "Raporlanan performanslar nested LOFO'dur: test edilen partinin hiçbir örneği (ebeveyn elma dahil) model kurulumunda ve seçiminde kullanılmamıştır.",
-      "OC-SIMCA kabul sınırı, görülmemiş otantik örneklerin en az %95'i kabul edilecek şekilde seçildi; seçimde bir partinin tağşişli örneğinin reddi yalnızca aynı partinin saf elması kabul edildiyse sayıldı.",
+      "OC-SIMCA iki eşik kullanır: görülmemiş otantiklerin %95'inin kabul edildiği eşiğin üstü \"tağşişli\", %90 ile %95 eşikleri arası \"şüpheli\" sayılır. Şüpheli örnekler de karar ağacından geçirilir ve olası tür/oran raporlanır; otantik örneklerin yaklaşık %5'i şüpheli çıkabilir.",
       "Düşük tağşiş oranları ve özellikle fruktoz şurubu FTIR ile zor ayırt edilir; \"otantik\" kararı tağşiş olmadığını kanıtlamaz, yalnızca bu yöntemin tespit sınırının altında olduğunu gösterir.",
       "Modeller tek laboratuvarın 2025 örnekleriyle ve her adulterantın sınırlı sayıda lotuyla kurulmuştur; farklı cihaz, bölge, çeşit ya da adulterant lotlarında performans düşebilir. İki adulterantın karışımı modellenmemiştir. Sonuçlar tarama amaçlıdır; resmi karar için doğrulayıcı analizlerle desteklenmelidir.",
     ].map(s => `<li>${esc(s)}</li>`).join("");

@@ -217,6 +217,11 @@ def main():
         cfg = s["config"]
         yt = torch.tensor(task["y"], device=DEV, dtype=DT)
         pj, mj, pred = fit(cfg, task["kind"], Xt, yt, task["train"])
+        if task["kind"] == "oc" and "threshold" in s:   # ampirik eşik: f/f_kritik ≤ 1 kuralı korunur
+            mj["fcrit"] *= s["threshold"]
+            mj["threshold_scale"] = s["threshold"]
+            mj["suspect"] = s.get("suspect")   # bu değerin üstü (≤ 1) "şüpheli"
+            pred = pred / s["threshold"]
         preds[name] = pred
         entry = dict(kind=task["kind"], config={k: v for k, v in cfg.items() if k != "task"}, pipeline=pj, model=mj,
                      perf=dict(lofo=s["lofo"], nested=s["nested"], **({"nested_tagsisli": s["nested_tagsisli"]} if "nested_tagsisli" in s else {})))

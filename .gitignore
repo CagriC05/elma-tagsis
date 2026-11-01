@@ -4,3 +4,4 @@ train/cache.npz
 __pycache__/
 *.pyc
 results_test/
+results_t1test/

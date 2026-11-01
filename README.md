@@ -8,12 +8,15 @@
 
 ```
 spektrum
-  └─ 1. Otantiklik (OC-SIMCA)            → otantik  ─────────────► sonuç: Otantik
-        └─ tağşişli
+  └─ 0. Ölçüm uygunluk kontrolü          → uygunsuz ─────────────► sonuç: Ölçüm reddedildi
+  └─ 1. Otantiklik (OC-SIMCA, iki eşik)  → otantik  ─────────────► sonuç: Otantik
+        └─ şüpheli (%90–%95 eşikleri arası) ya da tağşişli (%95 eşiği üstü)
              └─ 2. Şurup mu, meyve konsantresi mi?
                    ├─ şurup  → 3a. Glikoz mu, fruktoz mu?   → 4. o adulterantın regresyon modeli → oran (%)
                    └─ meyve  → 3b. Hurma mı, üzüm mü?      → 4. o adulterantın regresyon modeli → oran (%)
 ```
+
+OC-SIMCA eşikleri: görülmemiş otantik örneklerin %95'inin kabul edildiği eşiğin üstü **tağşişli**; %90 ile %95 eşikleri arası **şüpheli**. Şüpheli örnekler de karar ağacından geçirilir ve *olası* tür/oran raporlanır (otantik örneklerin ~%5'i şüpheli çıkabilir; doğrulayıcı analiz önerilir).
 
 Ek kontroller:
 - **Düşük güven:** sınıflandırma skoru, çapraz doğrulamada doğruluğun %80'in altına düştüğü bölgedeyse işaretlenir.

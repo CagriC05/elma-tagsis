@@ -341,16 +341,17 @@
       r.rejectReasons = r.qc.filter(c => c.level === "red").map(c => `${c.item}: ${c.value} — beklenen ${c.rule}`);
       return r;
     }
+    // f ≤ şüpheli eşiği: otantik · şüpheli eşiği < f ≤ 1: şüpheli (zincirden geçer) · f > 1: tağşişli
     const f = runTask(model, "T1_otantik", full);
-    r.steps.push({ node: "T1_otantik", value: f });
-    if (f <= 1) {
+    const sus = model.tasks.T1_otantik.model.suspect;
+    r.steps.push({ node: "T1_otantik", value: f, suspect: sus });
+    if (f <= 1 && !(sus && f > sus)) {
       r.verdict = "otantik";
       r.label = "Otantik";
-      if (f > 0.8) r.warnings.push("OC-SIMCA mesafesi sınıra yakın (f/f_kritik = " + f.toFixed(2) + ").");
       return r;
     }
-    r.verdict = "tagsisli";
-    if (f < 1.25) r.warnings.push("OC-SIMCA mesafesi sınıra yakın (f/f_kritik = " + f.toFixed(2) + ").");
+    r.verdict = f > 1 ? "tagsisli" : "supheli";
+    if (r.verdict === "supheli") r.warnings.push(`OC-SIMCA %95 eşiğinin altında ama %90 eşiğinin üstünde (f/f_kritik = ${f.toFixed(2)}); tağşiş olasılığı nedeniyle tür ve oran tahmini yapıldı.`);
     const node = (name, pos, neg) => {
       const s = runTask(model, name, full), thr = model.tasks[name].conf_threshold || 0;
       const low = Math.abs(s) < thr;
@@ -361,7 +362,7 @@
     const [cls, low3] = grp === "surup" ? node("T3_glikoz_fruktoz", "glikoz", "fruktoz") : node("T4_hurma_uzum", "hurma", "uzum");
     r.group = grp;
     r.cls = cls;
-    r.label = LABEL[cls];
+    r.label = (r.verdict === "supheli" ? "Şüpheli: olası " : "") + LABEL[cls];
     r.lowConfidence = low2 || low3;
     if (low2) r.warnings.push("Şurup / meyve konsantresi ayrımı düşük güvenli.");
     if (low3) r.warnings.push((grp === "surup" ? "Glikoz / fruktoz" : "Hurma / üzüm") + " ayrımı düşük güvenli.");

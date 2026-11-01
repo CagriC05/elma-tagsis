@@ -17,7 +17,12 @@ MODEL_RANK = {"ddsimca": 0, "pls": 0, "pca_lda": 0, "ridge": 1, "knn": 2, "krr_r
 SCATTER_RANK = {"none": 0, "snv": 1, "msc": 2, "emsc": 3}
 DERIV_RANK = {"none": 0, "sg11": 0.5, "d1w11": 1, "d1w21": 1, "d2w15": 2, "d2w25": 2, "d3w21": 3, "d3w31": 3}
 CLASSES = ["otantik", "glikoz", "fruktoz", "hurma", "uzum"]
-SIMCA_KMAX = 4   # OC-SIMCA'da fazla PC görülmemiş ailelerin saf elmalarını da reddettiriyor (overfitting)
+SIMCA_KMAX = 4   # otomatik seçimde üst sınır (T1_FIXED tanımlıysa kullanılmaz)
+# Kullanıcı kararı (2026-11-02): en çok tağşiş yakalayan k = 12 modeli. Eşik χ² yerine ampirik: görülmemiş
+# otantiklerin T1_SPEC kadarı kabul edilir. Değerlendirmede her ailenin eşiği o aile hariç otantiklerden hesaplanır.
+T1_FIXED = dict(region="850-3700", scatter="emsc", deriv="d1w21", model="ddsimca", k=12, alpha=0.05)
+T1_SPEC = 0.95
+T1_SUSPECT_SPEC = 0.90   # bu eşikle %95 eşiği arasındaki örnekler "şüpheli": zincirden geçirilir, olası tür/oran verilir
 
 
 def load_task(name):
@@ -88,6 +93,7 @@ def main():
     fam = t.aile.to_numpy()
     lvl = t.oran_yuzde.to_numpy()
     sel, nested_pred, rows_top, rows_grid, perf = {}, {}, [], [], []
+    nested_suspect = np.ones(len(t))   # T1_FIXED yoksa şüpheli bölgesi yok
     for name, task in T.items():
         meta_df, lofo, inner, sc, folds = load_task(name)
         meta = [{k: v for k, v in r.items() if not (isinstance(v, float) and np.isnan(v))} for r in meta_df.to_dict("records")]
@@ -96,23 +102,41 @@ def main():
         if kind == "oc":
             n_eff = (ev & (y < 0) & (task["orgidx"] >= 0)).sum()
             free = pick(sc, meta, kind, n_eff)
-            kmask = np.array([m_.get("k", 0) <= SIMCA_KMAX for m_ in meta])
+            kmask = np.array([T1_FIXED is not None or m_.get("k", 0) <= SIMCA_KMAX for m_ in meta])
             sc = np.where(kmask, sc, -np.inf)
             inner = np.where(kmask[:, None], inner, -np.inf)
             fs = oc_stats(lofo[free], y, ev)
             print(f"{name}: serbest seçim (k sınırı yok): {meta[free]} LOFO {fs} koşullu skor {sc_free_val(lofo[free], y, ev, task):.3f}")
         sel_extra = {}
-        # final seçim
-        b = pick(sc, meta, kind, n_eff)
-        # nested: her dış katta iç skorla seçim
+        tfam = task.get("fam", fam)
         npred = np.full(len(t), np.nan)
         chosen = []
-        tfam = task.get("fam", fam)
-        for i, k in enumerate(folds["fams"]):
-            j = pick(inner[:, i], meta, kind, n_eff)
-            rows = (tfam == k) & ev
-            npred[rows] = lofo[j, rows]
-            chosen.append(j)
+        if kind == "oc" and T1_FIXED:
+            b = next(i for i, m_ in enumerate(meta) if all(m_.get(k_) == v for k_, v in T1_FIXED.items()))
+            auth = y > 0
+            thr = float(np.quantile(lofo[b][auth], T1_SPEC))
+            susp = np.full(len(t), np.nan)          # her satır için şüpheli eşiği (ölçeklenmiş f biriminde)
+            for k in folds["fams"]:
+                rows = (tfam == k) & ev
+                o = auth & (tfam != k)
+                t95 = np.quantile(lofo[b][o], T1_SPEC)
+                npred[rows] = lofo[b, rows] / t95
+                susp[rows] = np.quantile(lofo[b][o], T1_SUSPECT_SPEC) / t95
+                chosen.append(b)
+            lofo = lofo.copy()
+            lofo[b] = lofo[b] / thr
+            suspect_all = float(np.quantile(lofo[b][auth], T1_SUSPECT_SPEC))
+            nested_suspect = susp
+            sel_extra = dict(threshold=thr, suspect=suspect_all, secim="kullanıcı kararı (k = 12, ampirik eşik)")
+        else:
+            # final seçim
+            b = pick(sc, meta, kind, n_eff)
+            # nested: her dış katta iç skorla seçim
+            for i, k in enumerate(folds["fams"]):
+                j = pick(inner[:, i], meta, kind, n_eff)
+                rows = (tfam == k) & ev
+                npred[rows] = lofo[j, rows]
+                chosen.append(j)
         nested_pred[name] = (npred, [meta[j] for j in chosen], dict(zip(folds["fams"], chosen)))
         m = ev
         if kind == "oc":
@@ -149,13 +173,15 @@ def main():
 
     # ---- T1 seviye bazında duyarlılık (nested)
     f1 = nested_pred["T1_otantik"][0]
-    lev = pd.DataFrame({"sinif": t.sinif, "oran": lvl, "red": f1 > 1})
+    lev = pd.DataFrame({"sinif": t.sinif, "oran": lvl, "red": f1 > 1, "red_s": f1 > nested_suspect})
     t1_level = lev.pivot_table(index="sinif", columns="oran", values="red", aggfunc="mean").round(3)
+    t1_level_s = lev.pivot_table(index="sinif", columns="oran", values="red_s", aggfunc="mean").round(3)
 
     # ---- uçtan uca (nested)
-    pred_cls, pred_lvl = [], []
+    pred_cls, pred_lvl, zone = [], [], []
     for i in range(len(t)):
-        if f1[i] <= 1:
+        zone.append("tağşişli" if f1[i] > 1 else "şüpheli" if f1[i] > nested_suspect[i] else "otantik")
+        if zone[-1] == "otantik":
             pred_cls.append("otantik"), pred_lvl.append(0.0)
             continue
         if t.sinif[i] == "otantik":                     # yanlış alarm: alt düğümler bu aile için değerlendirilmez
@@ -177,6 +203,7 @@ def main():
         pred_lvl.append(np.clip(r[i], 0, 100) if r is not None and c == t.sinif[i] else np.nan)
     e2e = t[["id", "dosya", "kaynak", "aile", "sinif", "oran_yuzde"]].copy()
     e2e["T1_f_fkrit"] = f1
+    e2e["T1_bolge"] = zone
     e2e["tahmin_sinif"] = pred_cls
     e2e["tahmin_oran"] = np.round(pred_lvl, 2)
     e2e["sinif_dogru"] = e2e.tahmin_sinif == e2e.sinif
@@ -190,12 +217,14 @@ def main():
     print("\nKarışıklık:\n", conf)
 
     tbl = lambda d: {str(r): {str(int(c)): (None if pd.isna(v) else float(v)) for c, v in row.items()} for r, row in d.iterrows()}
-    sel["_tablolar"] = dict(t1_seviye_red=tbl(t1_level), uctan_uca_dogruluk=tbl(acc_lvl), uctan_uca_ort_oran=tbl(lvl_mean),
+    sel["_tablolar"] = dict(t1_seviye_red=tbl(t1_level), t1_seviye_red_supheli_dahil=tbl(t1_level_s), uctan_uca_dogruluk=tbl(acc_lvl), uctan_uca_ort_oran=tbl(lvl_mean),
                             uctan_uca_regresyon={k: {kk: float(vv) for kk, vv in v.items()} for k, v in reg_e2e.T.to_dict().items()})
     (OUT / "secim.json").write_text(json.dumps(sel, indent=1, ensure_ascii=False, default=float))
     with pd.ExcelWriter(OUT / "rapor.xlsx", engine="openpyxl") as w:
         pd.DataFrame(perf).round(4).to_excel(w, sheet_name="Secilen_modeller", index=False)
         t1_level.to_excel(w, sheet_name="T1_seviye_duyarlilik")
+        t1_level_s.to_excel(w, sheet_name="T1_seviye_supheli_dahil")
+        pd.crosstab(e2e.sinif, e2e.T1_bolge).to_excel(w, sheet_name="T1_bolgeler")
         acc_lvl.to_excel(w, sheet_name="UcUca_dogruluk_seviye")
         conf.to_excel(w, sheet_name="UcUca_karisiklik")
         reg_e2e.to_excel(w, sheet_name="UcUca_regresyon")
