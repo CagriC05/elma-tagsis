@@ -13,7 +13,6 @@
   const NODE = { T1_otantik: "Otantiklik (OC-SIMCA)", T2_surup_meyve: "Şurup / meyve konsantresi", T3_glikoz_fruktoz: "Glikoz / fruktoz",
     T4_hurma_uzum: "Hurma / üzüm", R_glikoz: "Oran: glikoz", R_fruktoz: "Oran: fruktoz", R_hurma: "Oran: hurma", R_uzum: "Oran: üzüm" };
   const TREE = Object.keys(NODE);
-  const CLS = { otantik: "Otantik", glikoz: "Glikoz", fruktoz: "Fruktoz", hurma: "Hurma", uzum: "Üzüm" };
   const LVL = { red: "Red", uyari: "Uyarı", ok: "Uygun" };
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fmt = (v, d = 1) => v === null || v === undefined || isNaN(v) ? "—" : Number(v).toFixed(d);
@@ -86,7 +85,6 @@
       (info.name ? ` <span class="muted">${esc(info.name)}</span>` : "") +
       `<div class="note">Eğitim: ${n.otantik ?? "?"} otantik, ${n.tagsisli ?? "?"} tağşişli spektrum, ${n.aile ?? "?"} aile` +
       (m.qc ? ` · ölçüm dönemi ${esc(m.qc.acquisition.period.join(" – "))}` : " · <span class='warn'>bu modelde ölçüm kabul kriterleri yok</span>") + "</div>";
-    showModels();
     rows.forEach(r => { if (r.full) analyzeRow(r); });
     render();
     if ($("#detail").style.display === "block") $("#detail").style.display = "none";
@@ -129,11 +127,6 @@
       $("#model-msg").innerHTML = `<span class="warn">Model yüklenemedi: ${esc(err.message)}</span>`;
     }
   });
-  $("#model-download").onclick = () => {
-    if (!MODEL) return;
-    download(new Blob([JSON.stringify(MODEL)], { type: "application/json" }), `model_${MODEL.version || "etkin"}.json`);
-  };
-
   // ================================================================ dosya yükleme ve analiz
   const drop = $("#drop"), input = $("#file");
   ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
@@ -328,7 +321,7 @@
       <h2>Özet</h2>
       <table><thead><tr><th>Dosya</th><th>Karar</th><th>Tür</th><th class="num">Oran</th><th>Uyarı / red nedeni</th></tr></thead><tbody>${summary}</tbody></table>
       <h2>Numune ayrıntıları</h2>${details}
-      <h2>Yöntem ve sınırlamalar</h2><ul class="small">${$("#method").innerHTML}</ul>
+      <h2>Yöntem ve sınırlamalar</h2><ul class="small">${METHOD.map(m => `<li>${esc(m)}</li>`).join("")}</ul>
       <p class="small">Model doğrulama performansları (nested leave-one-family-out): ${Object.entries(MODEL.tasks).map(([k, t]) => `${NODE[k]}: ${perf(t)}`).join("; ")}.</p>`;
     window.print();
   };
@@ -342,50 +335,14 @@
     return `RMSEP ${fmt(n.RMSEP, 2)}` + (a ? ` (tağşişlilerde ${fmt(a.RMSEP, 2)})` : "") + `, R² ${fmt(n.R2, 2)}`;
   }
 
-  function showModels() {
-    const m = MODEL;
-    $("#m-info").textContent = `Model sürümü ${m.version} · eğitim: ${m.n_train.otantik} otantik, ${m.n_train.tagsisli} tağşişli spektrum, ${m.n_train.aile} aile.`;
-    $("#m-table").innerHTML = `<thead><tr><th>Düğüm</th><th>Teknik</th><th>Ön işleme</th><th>Nested LOFO performansı</th></tr></thead><tbody>` +
-      Object.entries(m.tasks).map(([k, t]) => {
-        const c = t.config, hp = Object.entries(c).filter(([a]) => !["region", "scatter", "deriv", "model"].includes(a)).map(([a, v]) => `${a}=${v}`).join(", ");
-        return `<tr><td>${NODE[k]}</td><td>${MODEL_NAME[c.model]} <span class="muted">${esc(hp)}</span></td><td>${c.region} · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</td><td>${perf(t)}</td></tr>`;
-      }).join("") + "</tbody>";
-    const heat = (tbl, sel) => {
-      if (!tbl) { $(sel).innerHTML = ""; return; }
-      const rowsK = Object.keys(tbl).filter(k => CLS[k]);
-      const cols = Array.from(new Set(rowsK.flatMap(k => Object.keys(tbl[k])))).filter(c => rowsK.some(k => tbl[k][c] !== null)).sort((a, b) => a - b);
-      $(sel).innerHTML = `<thead><tr><th></th>${cols.map(c => `<th class="num">%${c}</th>`).join("")}</tr></thead><tbody>` +
-        rowsK.map(k => `<tr><td>${CLS[k]}</td>${cols.map(c => {
-          const v = tbl[k][c];
-          return `<td class="num">${v === null || v === undefined ? "" : Math.round(v * 100) + "%"}</td>`;
-        }).join("")}</tr>`).join("") + "</tbody>";
-    };
-    heat(m.validation && (m.validation.t1_seviye_red_supheli_dahil || m.validation.t1_seviye_red), "#m-t1");
-    heat(m.validation && m.validation.uctan_uca_dogruluk, "#m-e2e");
-    if (m.qc) {
-      const a = m.qc.acquisition, s = m.qc.spectral, f = v => Number(v).toFixed(3);
-      const rr = [["Veri birimi", a.units.join(", "), "red"], ["Çözünürlük", a.resolution.join(", ") + " cm⁻¹", "red"],
-        ["Örnek tarama sayısı", `≥ ${a.scans_typ} (altı uyarı, < ${a.scans_min} red)`, "red/uyarı"], ["Arka plan tarama sayısı", `≥ ${a.bg_scans_min}`, "red"],
-        ["Örnekleme aksesuarı", a.accessory.join(", "), "red"], ["Cihaz", a.serial.join(", "), "uyarı"], ["Arka plan yaşı", `≤ ${a.bg_age_max} dk`, "red"],
-        ["Spektral aralık", `${a.xmin_max}–${a.xmax_min} cm⁻¹ kapsanmalı`, "red"],
-        [s.noise.label, `uyarı > ${s.noise.warn.toFixed(1)}, red > ${s.noise.reject.toFixed(1)}`, "red/uyarı"],
-        [s.fp.label, `red < ${f(s.fp.lo)}, uyarı > ${f(s.fp.warn_hi)}`, "red/uyarı"],
-        [s.oh.label, `uyarı ${f(s.oh.warn_lo)}–${f(s.oh.warn_hi)} dışı, red < ${f(s.oh.lo)}`, "red/uyarı"],
-        [s.base.label, `|A| ≤ ${f(s.base.abs_max)}`, "red"], [s.minA.label, `≥ ${f(s.minA.lo)}`, "red"],
-        ["Eğitim verisine benzerlik (DD-SIMCA, α = 0,001)", "f/f_kritik ≤ 1", "red"]];
-      $("#m-qc").innerHTML = "<thead><tr><th>Kontrol</th><th>Kriter</th><th>Sonuç</th></tr></thead><tbody>" +
-        rr.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="muted">${r[2]}</td></tr>`).join("") + "</tbody>" +
-        `<caption class="note" style="caption-side:bottom;text-align:left;padding-top:6px">Kriterler eğitim verisinin ölçüm profilinden türetilmiştir (${esc(a.period.join(" – "))}). Spektral kontroller eğitim spektrumlarının ${m.qc.train_rejected}/${m.qc.train_n} tanesini reddederdi.</caption>`;
-    } else $("#m-qc").innerHTML = '<tbody><tr><td class="warn">Bu modelde ölçüm kabul kriterleri tanımlı değil.</td></tr></tbody>';
-    $("#method").innerHTML = [
-      "Her spektrum önce ölçüm uygunluk kontrolünden geçer: .spa başlığındaki parametreler (veri birimi, çözünürlük, tarama sayısı, aksesuar, arka plan yaşı) ve spektral metrikler (gürültü, kristal teması, baz çizgisi) eğitim verisinin profiliyle karşılaştırılır; uygunsuz ölçümler reddedilir ve sonuç verilmez.",
-      "Her karar düğümü için ön işleme (bölge × SNV/MSC/EMSC × Savitzky-Golay türevleri) ve teknik (DD-SIMCA, PLS, PLS-DA, PCA-LDA, ridge, RBF çekirdek, kNN, MLP, 1D-CNN) kombinasyonları tarandı; seçim aile bazlı (leave-one-family-out) çapraz doğrulama ve 1-SE kuralıyla yapıldı.",
-      "Raporlanan performanslar nested LOFO'dur: test edilen partinin hiçbir örneği (ebeveyn elma dahil) model kurulumunda ve seçiminde kullanılmamıştır.",
-      "OC-SIMCA iki eşik kullanır: görülmemiş otantiklerin %95'inin kabul edildiği eşiğin üstü \"tağşişli\", %90 ile %95 eşikleri arası \"şüpheli\" sayılır. Şüpheli örnekler de karar ağacından geçirilir ve olası tür/oran raporlanır; otantik örneklerin yaklaşık %5'i şüpheli çıkabilir.",
-      "Düşük tağşiş oranları ve özellikle fruktoz şurubu FTIR ile zor ayırt edilir; \"otantik\" kararı tağşiş olmadığını kanıtlamaz, yalnızca bu yöntemin tespit sınırının altında olduğunu gösterir.",
-      "Modeller tek laboratuvarın 2025 örnekleriyle ve her adulterantın sınırlı sayıda lotuyla kurulmuştur; farklı cihaz, bölge, çeşit ya da adulterant lotlarında performans düşebilir. İki adulterantın karışımı modellenmemiştir. Sonuçlar tarama amaçlıdır; resmi karar için doğrulayıcı analizlerle desteklenmelidir.",
-    ].map(s => `<li>${esc(s)}</li>`).join("");
-  }
+  const METHOD = [
+    "Her spektrum önce ölçüm uygunluk kontrolünden geçer: .spa başlığındaki parametreler (veri birimi, çözünürlük, tarama sayısı, aksesuar, arka plan yaşı) ve spektral metrikler (gürültü, kristal teması, baz çizgisi) eğitim verisinin profiliyle karşılaştırılır; uygunsuz ölçümler reddedilir ve sonuç verilmez.",
+    "Her karar düğümü için ön işleme (bölge × SNV/MSC/EMSC × Savitzky-Golay türevleri) ve teknik (DD-SIMCA, PLS, PLS-DA, PCA-LDA, ridge, RBF çekirdek, kNN, MLP, 1D-CNN) kombinasyonları tarandı; seçim aile bazlı (leave-one-family-out) çapraz doğrulama ile yapıldı.",
+    "Raporlanan performanslar leave-one-family-out değerlendirmedir: test edilen partinin hiçbir örneği (ebeveyn elma dahil) model kurulumunda kullanılmamıştır.",
+    "OC-SIMCA iki eşik kullanır: görülmemiş otantiklerin %95'inin kabul edildiği eşiğin üstü \"tağşişli\", %90 ile %95 eşikleri arası \"şüpheli\" sayılır. Şüpheli örnekler de karar ağacından geçirilir ve olası tür/oran raporlanır; otantik örneklerin yaklaşık %5'i şüpheli çıkabilir.",
+    "Düşük tağşiş oranları ve özellikle fruktoz şurubu FTIR ile zor ayırt edilir; \"otantik\" kararı tağşiş olmadığını kanıtlamaz, yalnızca bu yöntemin tespit sınırının altında olduğunu gösterir.",
+    "Modeller tek laboratuvarın 2025 örnekleriyle ve her adulterantın sınırlı sayıda lotuyla kurulmuştur; farklı cihaz, bölge, çeşit ya da adulterant lotlarında performans düşebilir. İki adulterantın karışımı modellenmemiştir. Sonuçlar tarama amaçlıdır; resmi karar için doğrulayıcı analizlerle desteklenmelidir.",
+  ];
 
   const READY = boot();
 })();

@@ -96,8 +96,7 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
 </head>
 <body>
 <main>
-  <h1>Elma Konsantresi Tağşiş Tespiti</h1>
-  <p class="sub">70 Brix elma konsantresi · FTIR-ATR spektrumu · ölçüm kontrolü → OC-SIMCA → şurup / meyve konsantresi → tür → oran</p>
+  <h1 style="margin-bottom:20px">Elma Konsantresi Tağşiş Tespiti</h1>
 
   <section id="model-panel" class="panel">
     <div class="row">
@@ -105,7 +104,6 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
       <div class="bar" style="margin:0">
         <label class="btn" for="model-file">Yeni model yükle (.json)</label>
         <input id="model-file" type="file" accept=".json,application/json" hidden>
-        <button id="model-download">Etkin modeli indir</button>
       </div>
     </div>
     <details id="model-manage" style="margin-top:10px">
@@ -119,8 +117,7 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
   <h2>Analiz</h2>
   <label id="drop">
     <input id="file" type="file" multiple accept=".spa,.tsv,.csv,.txt" hidden>
-    <strong>Spektrum dosyalarını buraya bırakın ya da tıklayıp seçin</strong>
-    <span>OMNIC .spa (ölçüm parametreleri de kontrol edilir) · iki sütunlu .tsv / .csv / .txt · matris CSV. Dosyalar bilgisayarınızdan çıkmaz.</span>
+    <strong style="margin:0">Spektrum dosyalarını buraya bırakın ya da tıklayıp seçin</strong>
   </label>
   <p id="status" class="note"></p>
 
@@ -157,22 +154,6 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
     <div class="scroll"><table id="d-qc" class="qc"></table></div>
     <div id="d-meta" class="note"></div>
   </section>
-
-  <h2>Modeller ve doğrulama</h2>
-  <div class="panel">
-    <p class="note" id="m-info"></p>
-    <div class="scroll"><table id="m-table"></table></div>
-    <h3>OC-SIMCA: tağşişli ya da şüpheli olarak işaretlenme oranı (LOFO)</h3>
-    <div class="scroll"><table id="m-t1"></table></div>
-    <h3>Uçtan uca doğru sınıf oranı (nested LOFO)</h3>
-    <div class="scroll"><table id="m-e2e"></table></div>
-    <h3>Ölçüm kabul kriterleri</h3>
-    <div class="scroll"><table id="m-qc"></table></div>
-    <details style="margin-top:16px">
-      <summary>Yöntem ve sınırlamalar</summary>
-      <ul class="note" id="method"></ul>
-    </details>
-  </div>
 
   <footer id="foot">Hesaplamaların tamamı tarayıcınızda yapılır; yüklenen dosyalar hiçbir sunucuya gönderilmez.</footer>
 </main>
