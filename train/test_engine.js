@@ -3,7 +3,7 @@ const fs = require("fs"), path = require("path");
 const E = require("../docs/engine.js");
 const docs = path.join(__dirname, "..", "docs");
 const M = JSON.parse(fs.readFileSync(path.join(docs, "model.json")));
-const R = JSON.parse(fs.readFileSync(path.join(docs, "test_ref.json")));
+const R = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "results", "test_ref.json")));
 let worst = 0, fail = 0;
 for (const [task, exp] of Object.entries(R.expected)) {
   const t = task === "domain" ? M.domain : M.tasks[task];

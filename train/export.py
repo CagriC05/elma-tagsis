@@ -257,7 +257,7 @@ def main():
     sm_ = spectral_metrics(X[idx])
     ref = dict(ids=t.id.iloc[idx].tolist(), X=r7(X[idx]), expected={k: r7(v[idx]) for k, v in preds.items()},
                metrics={k: r7(v) for k, v in sm_.items()})
-    (DOCS / "test_ref.json").write_text(json.dumps(ref, separators=(",", ":")))
+    (OUT / "test_ref.json").write_text(json.dumps(ref, separators=(",", ":")))   # yayınlanmaz (results/ depoda değil)
     print("model.json:", round((DOCS / "model.json").stat().st_size / 1e6, 2), "MB")
 
 
