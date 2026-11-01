@@ -351,7 +351,8 @@
       return r;
     }
     r.verdict = f > 1 ? "tagsisli" : "supheli";
-    if (r.verdict === "supheli") r.warnings.push(`OC-SIMCA %95 eşiğinin altında ama %90 eşiğinin üstünde (f/f_kritik = ${f.toFixed(2)}); tağşiş olasılığı nedeniyle tür ve oran tahmini yapıldı.`);
+    const t1m = model.tasks.T1_otantik.model, pc = v => "%" + Math.round(v * 100);
+    if (r.verdict === "supheli") r.warnings.push(`OC-SIMCA ${pc(t1m.spec || 0.95)} eşiğinin altında ama ${pc(t1m.suspect_spec || 0.8)} şüphe eşiğinin üstünde (f/f_kritik = ${f.toFixed(2)}); tağşiş olasılığı nedeniyle tür ve oran tahmini yapıldı.`);
     const node = (name, pos, neg) => {
       const s = runTask(model, name, full), thr = model.tasks[name].conf_threshold || 0;
       const low = Math.abs(s) < thr;

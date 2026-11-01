@@ -221,6 +221,7 @@ def main():
             mj["fcrit"] *= s["threshold"]
             mj["threshold_scale"] = s["threshold"]
             mj["suspect"] = s.get("suspect")   # bu değerin üstü (≤ 1) "şüpheli"
+            mj["spec"], mj["suspect_spec"] = s.get("spec"), s.get("suspect_spec")
             pred = pred / s["threshold"]
         preds[name] = pred
         entry = dict(kind=task["kind"], config={k: v for k, v in cfg.items() if k != "task"}, pipeline=pj, model=mj,

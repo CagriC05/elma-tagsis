@@ -22,7 +22,7 @@ SIMCA_KMAX = 4   # otomatik seçimde üst sınır (T1_FIXED tanımlıysa kullan�
 # otantiklerin T1_SPEC kadarı kabul edilir. Değerlendirmede her ailenin eşiği o aile hariç otantiklerden hesaplanır.
 T1_FIXED = dict(region="850-3700", scatter="emsc", deriv="d1w21", model="ddsimca", k=12, alpha=0.05)
 T1_SPEC = 0.95
-T1_SUSPECT_SPEC = 0.90   # bu eşikle %95 eşiği arasındaki örnekler "şüpheli": zincirden geçirilir, olası tür/oran verilir
+T1_SUSPECT_SPEC = 0.80   # bu eşikle %95 eşiği arasındaki örnekler "şüpheli": zincirden geçirilir, olası tür/oran verilir
 
 
 def load_task(name):
@@ -127,7 +127,8 @@ def main():
             lofo[b] = lofo[b] / thr
             suspect_all = float(np.quantile(lofo[b][auth], T1_SUSPECT_SPEC))
             nested_suspect = susp
-            sel_extra = dict(threshold=thr, suspect=suspect_all, secim="kullanıcı kararı (k = 12, ampirik eşik)")
+            sel_extra = dict(threshold=thr, suspect=suspect_all, spec=T1_SPEC, suspect_spec=T1_SUSPECT_SPEC,
+                             secim="kullanıcı kararı (k = 12, ampirik eşik)")
         else:
             # final seçim
             b = pick(sc, meta, kind, n_eff)
