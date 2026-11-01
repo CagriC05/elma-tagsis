@@ -12,6 +12,7 @@ from scipy.signal import savgol_filter
 
 from inventory import build
 from load import GRID, read_any
+from spa_meta import read_spa_meta
 
 GROUP = {"otantik": "otantik", "glikoz": "surup", "fruktoz": "surup", "hurma": "meyve", "uzum": "meyve"}
 CODE = {"otantik": "A", "glikoz": "G", "fruktoz": "F", "hurma": "H", "uzum": "U"}
@@ -93,6 +94,13 @@ def main(root, out):
     t["not"] = ["; ".join(n) for n in notes]
     t.insert(0, "id", [f"S{i + 1:03d}" for i in range(len(t))])
     t["dosya_yolu"] = [str(Path(p).relative_to(root)) for p in df.path]
+    # SPA başlığındaki ölçüm parametreleri (TSV'nin aynı adlı .spa kardeşinden)
+    metas = []
+    for p, spa in zip(df.path, df.get("spa", pd.Series([None] * len(df)))):
+        sp = spa if isinstance(spa, str) else (str(Path(p).with_suffix(".spa")) if Path(p).with_suffix(".spa").exists() else None)
+        metas.append(read_spa_meta(sp) if sp else {})
+    for k in ["units", "scans", "bg_scans", "resolution", "serial", "accessory", "bg_age_min", "collected"]:
+        t[f"spa_{k}"] = [m.get(k) for m in metas]
 
     order = t.assign(_k=t.kaynak.map({"Parti serisi": 0, "PBN tank": 1, "Mart": 2}),
                      _c=t.sinif.map({"otantik": 0, "glikoz": 1, "fruktoz": 2, "hurma": 3, "uzum": 4}).fillna(9))

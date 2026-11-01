@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.signal import savgol_coeffs
 from scipy.stats import chi2
 from sklearn.linear_model import LogisticRegression
 
@@ -139,6 +140,47 @@ def fit(cfg, kind, Xt, yt, tr):
     return pj, mj, pred
 
 
+QC_KERNEL = savgol_coeffs(11, 3, use="conv")
+
+
+def spectral_metrics(X):
+    """docs/engine.js spectralMetrics ile aynı tanımlar (tam ızgara, 2 cm-1)."""
+    X = np.atleast_2d(X)
+    ix = lambda w: int(np.argmin(np.abs(GRID - w)))
+    i0, i1 = int(np.searchsorted(GRID, 900)), int(np.searchsorted(GRID, 1200, side="right"))
+    sm = np.array([np.convolve(r[i0 - 5:i1 + 5], QC_KERNEL, mode="valid") for r in X])
+    base = X[:, ix(3900)]
+    return dict(noise=(X[:, i0:i1] - sm).std(1) * 1e3, base=base, oh=X[:, ix(3300)] - base,
+                fp=X[:, i0:i1].max(1) - base, minA=(X[:, ix(850):ix(3700)] - base[:, None]).min(1))
+
+
+def qc_profile(t, X):
+    """Kabul kriterleri: SPA ölçüm parametreleri eğitim profilinden, spektral metrikler eğitim dağılımından."""
+    m = spectral_metrics(X)
+    med = lambda v: float(np.median(v))
+    mad = lambda v: float(np.median(np.abs(v - np.median(v))) * 1.4826)
+    spec = dict(
+        noise=dict(warn=float(np.quantile(m["noise"], 0.9)), reject=float(m["noise"].max() * 1.25),
+                   label="Gürültü (900–1200 cm⁻¹, ×1000)"),
+        oh=dict(warn_lo=med(m["oh"]) - 6 * mad(m["oh"]), warn_hi=med(m["oh"]) + 6 * mad(m["oh"]), lo=0.5 * med(m["oh"]),
+                label="O–H bandı yüksekliği (3300 − 3900 cm⁻¹); Brix / kristal teması"),
+        fp=dict(lo=med(m["fp"]) - 6 * mad(m["fp"]), warn_hi=med(m["fp"]) + 6 * mad(m["fp"]),
+                label="Parmak izi tepe yüksekliği (900–1200 cm⁻¹); kristal teması"),
+        base=dict(abs_max=float(np.abs(m["base"]).max() * 1.25), label="Baz çizgisi kayması (3900 cm⁻¹)"),
+        minA=dict(lo=float(m["minA"].min() - 0.05), label="En düşük absorbans (baz düzeltilmiş); arka plan hatası"),
+    )
+    sp = t[t.spa_scans.notna()]
+    acq = dict(units=sorted(set(sp.spa_units)), resolution=sorted(set(sp.spa_resolution.astype(float))),
+               scans_min=int(sp.spa_scans.min()), scans_typ=int(sp.spa_scans.mode()[0]),
+               bg_scans_min=int(sp.spa_bg_scans.min()), accessory=sorted(set(sp.spa_accessory.dropna())),
+               serial=sorted(set(sp.spa_serial.dropna())), bg_age_max=float(np.ceil(sp.spa_bg_age_min.max() / 5) * 5),
+               xmin_max=850.0, xmax_min=3700.0, period=[sp.spa_collected.min()[:10], sp.spa_collected.max()[:10]])
+    # eğitim verisinde kaç spektrum reddedilirdi (bilgi)
+    rej = (m["noise"] > spec["noise"]["reject"]) | (m["oh"] < spec["oh"]["lo"]) | \
+          (m["fp"] < spec["fp"]["lo"]) | (np.abs(m["base"]) > spec["base"]["abs_max"]) | (m["minA"] < spec["minA"]["lo"])
+    return dict(acquisition=acq, spectral=spec, train_rejected=int(rej.sum()), train_n=len(t))
+
+
 def find_config(meta, cfg):
     ok = np.ones(len(meta), bool)
     for k, v in cfg.items():
@@ -177,7 +219,7 @@ def main():
         pj, mj, pred = fit(cfg, task["kind"], Xt, yt, task["train"])
         preds[name] = pred
         entry = dict(kind=task["kind"], config={k: v for k, v in cfg.items() if k != "task"}, pipeline=pj, model=mj,
-                     perf=dict(lofo=s["lofo"], nested=s["nested"]))
+                     perf=dict(lofo=s["lofo"], nested=s["nested"], **({"nested_tagsisli": s["nested_tagsisli"]} if "nested_tagsisli" in s else {})))
         if task["kind"] == "clf":
             from select_models import load_task
             meta, lofo, _, _, _ = load_task(name)
@@ -198,6 +240,8 @@ def main():
     preds["domain"] = pd_
     print("kapsam modeli: eğitim örneklerinin", round(float((pd_ <= 1).mean()), 3), "kadarı içeride")
 
+    out["qc"] = qc_profile(t, X)
+    print("kabul kriterleri: eğitim spektrumlarından", out["qc"]["train_rejected"], "/", len(t), "spektral kontrolde reddedilirdi")
     out["ref_spectrum"] = dict(otantik=r7(X[t.sinif == "otantik"].mean(0)[::2]), step=2 * float(GRID[1] - GRID[0]))
     out["validation"] = sel["_tablolar"]
 
@@ -205,7 +249,9 @@ def main():
     (DOCS / "model.json").write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=float, allow_nan=False))
     rng = np.random.default_rng(0)
     idx = rng.choice(len(t), 12, replace=False)
-    ref = dict(ids=t.id.iloc[idx].tolist(), X=r7(X[idx]), expected={k: r7(v[idx]) for k, v in preds.items()})
+    sm_ = spectral_metrics(X[idx])
+    ref = dict(ids=t.id.iloc[idx].tolist(), X=r7(X[idx]), expected={k: r7(v[idx]) for k, v in preds.items()},
+               metrics={k: r7(v) for k, v in sm_.items()})
     (DOCS / "test_ref.json").write_text(json.dumps(ref, separators=(",", ":")))
     print("model.json:", round((DOCS / "model.json").stat().st_size / 1e6, 2), "MB")
 

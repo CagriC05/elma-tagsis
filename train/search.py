@@ -39,7 +39,8 @@ def tasks(t):
     adult = c != "otantik"
     pm = lambda m: np.where(m, 1.0, -1.0)
     T = {
-        "T1_otantik": dict(kind="oc", train=c == "otantik", eval=np.ones(len(t), bool), y=pm(c == "otantik")),
+        "T1_otantik": dict(kind="oc", train=c == "otantik", eval=np.ones(len(t), bool), y=pm(c == "otantik"),
+                           orgidx=org_index(t)),
         "T2_surup_meyve": dict(kind="clf", train=adult, eval=adult, y=pm(np.isin(c, ["glikoz", "fruktoz"]))),
         "T3_glikoz_fruktoz": dict(kind="clf", train=np.isin(c, ["glikoz", "fruktoz"]), y=pm(c == "glikoz")),
         "T4_hurma_uzum": dict(kind="clf", train=np.isin(c, ["hurma", "uzum"]), y=pm(c == "hurma")),
@@ -55,6 +56,12 @@ def tasks(t):
     for v in T.values():
         v.setdefault("eval", v["train"])
     return T
+
+
+def org_index(t):
+    """Her satır için aynı ailedeki ORG (ebeveyn elma) satırının indeksi; yoksa -1."""
+    org = {f: i for i, (f, k, c) in enumerate(zip(t.aile, t.kaynak, t.sinif)) if k == "Parti serisi" and c == "otantik"}
+    return np.array([org.get(f, -1) for f in t.aile])
 
 
 def make_folds(fam, train, ev, n_inner=5):
@@ -74,8 +81,12 @@ def make_folds(fam, train, ev, n_inner=5):
     return fams, np.array(tr), np.array(te), np.array(outer), np.array(inner)
 
 
-def scores(pred, mask, y, kind, ev):
-    """pred [O, H, n], mask [O, n] -> skor [O, H] (yüksek = iyi)."""
+def scores(pred, mask, y, kind, ev, orgidx=None):
+    """pred [O, H, n], mask [O, n] -> skor [O, H] (yüksek = iyi).
+
+    OC: özgüllük >= SPEC_MIN şartıyla koşullu duyarlılık. Tağşişli bir örneğin reddi yalnızca aynı ailenin ebeveyn
+    elması (ORG) kabul edildiyse sayılır; böylece partinin kendisini (ölçüm farkını) reddeden modeller ödüllenmez.
+    Payda sabittir: ORG'si olan ailelerin tüm tağşişli örnekleri."""
     m = (mask & ev)[:, None, :]
     if kind == "reg":
         return -np.sqrt((((pred - y) ** 2) * m).sum(-1) / m.sum(-1))
@@ -85,7 +96,10 @@ def scores(pred, mask, y, kind, ev):
         return (rec[0] + rec[1]) / 2
     acc = pred <= 1
     spec = (acc & m & (y > 0)).sum(-1) / np.maximum((m & (y > 0)).sum(-1), 1)
-    sens = (~acc & m & (y < 0)).sum(-1) / np.maximum((m & (y < 0)).sum(-1), 1)
+    has = (orgidx >= 0) & (y < 0)
+    parent_ok = acc[..., np.maximum(orgidx, 0)] & has
+    cm = m & has
+    sens = (~acc & parent_ok & cm).sum(-1) / np.maximum(cm.sum(-1), 1)
     return np.where(spec >= SPEC_MIN, sens, spec - 1)
 
 
@@ -162,8 +176,9 @@ def search_task(name, task, t, X, cnn_only=False):
         lofo = (P[outer] * TE[outer][:, None, :]).sum(0)                # [C, n]
         pin = (P[inner] * TE[inner][..., None, :]).sum(1)              # [O, C, n]
         min_ = TE[inner].sum(1).astype(bool)                            # [O, n]
-        inner_sc = scores(pin, min_, y, kind, ev).T                     # [C, O]
-        lofo_sc = scores(lofo[None], TE[outer].sum(0, keepdims=True).astype(bool), y, kind, ev)[0]
+        oi = task.get("orgidx")
+        inner_sc = scores(pin, min_, y, kind, ev, oi).T                 # [C, O]
+        lofo_sc = scores(lofo[None], TE[outer].sum(0, keepdims=True).astype(bool), y, kind, ev, oi)[0]
         np.savez_compressed(f, lofo=lofo.astype(np.float32), inner=inner_sc.astype(np.float32),
                             lofo_score=lofo_sc.astype(np.float32), meta=json.dumps(meta))
         best = int(np.argmax(lofo_sc))

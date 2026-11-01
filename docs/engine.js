@@ -4,19 +4,43 @@
   "use strict";
 
   // ------------------------------------------------------------ dosya okuma
+  const UNITS = { 17: "Absorbance", 16: "%Transmittance", 11: "%Reflectance", 12: "Log(1/R)", 3: "Single beam", 15: "Interferogram" };
+
+  function latin1(dv, off, size) {
+    let s = "";
+    for (let i = 0; i < size; i++) s += String.fromCharCode(dv.getUint8(off + i));
+    return s.replace(/[\x00-\x08\x0b-\x1f]+/g, "\n");
+  }
+
+  function parseWhen(s) {   // "Monday, September 1, 2025 9:14:31 AM (GMT03:00)"
+    const m = /(\w+) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}):(\d{2}) ([AP]M)/.exec(s || "");
+    if (!m) return null;
+    const mon = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].indexOf(m[1]);
+    let h = +m[4] % 12 + (m[7] === "PM" ? 12 : 0);
+    return new Date(Date.UTC(+m[3], mon, +m[2], h, +m[5], +m[6]));
+  }
+
+  // train/spa_meta.py ile aynı alanlar
   function readSPA(buf) {
     const dv = new DataView(buf);
     const nKeys = dv.getUint16(294, true);
-    let npts = null, wmax, wmin, off = null;
+    let npts = null, wmax, wmin, off = null, hist = "", acc = "";
+    const meta = {};
     for (let i = 0; i < nKeys; i++) {
       const pos = 304 + 16 * i;
       const key = dv.getUint8(pos);
-      const o = dv.getUint32(pos + 2, true);
+      const o = dv.getUint32(pos + 2, true), size = dv.getUint32(pos + 6, true);
       if (key === 2) {
         npts = dv.getUint32(o + 4, true);
+        const u = dv.getUint32(o + 12, true);
+        meta.units = UNITS[u] || String(u);
         wmax = dv.getFloat32(o + 16, true);
         wmin = dv.getFloat32(o + 20, true);
+        meta.scans = dv.getUint32(o + 36, true);
+        meta.bg_scans = dv.getUint32(o + 52, true);
       } else if (key === 3) off = o;
+      else if (key === 27) hist = latin1(dv, o, size);
+      else if (key === 151) acc = latin1(dv, o, size);
     }
     if (npts === null || off === null) throw new Error("SPA dosyası çözülemedi");
     const x = new Float64Array(npts), y = new Float64Array(npts);
@@ -24,7 +48,21 @@
       x[i] = wmax + (wmin - wmax) * i / (npts - 1);
       y[i] = dv.getFloat32(off + 4 * i, true);
     }
-    return [{ name: null, x, y }];
+    meta.xmin = Math.min(wmin, wmax);
+    meta.xmax = Math.max(wmin, wmax);
+    let m = /Resolution:\s*([\d.]+)/.exec(hist);
+    meta.resolution = m ? parseFloat(m[1]) : null;
+    m = /serial number:\s*(\S+)/.exec(hist);
+    meta.serial = m ? m[1] : null;
+    m = /Collect Sample on (.+)/.exec(hist);
+    const ts = m ? parseWhen(m[1]) : null;
+    m = /Background collected on (.+)/.exec(hist);
+    const tb = m ? parseWhen(m[1]) : null;
+    meta.collected = ts ? ts.toISOString().slice(0, 19).replace("T", " ") : null;
+    meta.bg_age_min = ts && tb ? Math.round((ts - tb) / 6000) / 10 : null;
+    meta.accessory = acc.split("\n").map(l => l.trim()).find(l => /ATR|Smart/.test(l)) || null;
+    meta.title = latin1(dv, 30, 256).split("\n")[0].trim();
+    return [{ name: null, x, y, meta }];
   }
 
   function parseNum(s) {
@@ -76,6 +114,70 @@
       g[i] = ys[j] + t * (ys[j + 1] - ys[j]);
     }
     return g;
+  }
+
+  // ------------------------------------------------------------ ölçüm uygunluk kontrolü
+  // train/export.py spectral_metrics ile aynı tanımlar
+  const QC_KERNEL = [-0.08391608391608392, 0.02097902097902098, 0.10256410256410256, 0.16083916083916083, 0.1958041958041958,
+    0.2074592074592075, 0.1958041958041958, 0.16083916083916083, 0.10256410256410256, 0.02097902097902098, -0.08391608391608392];
+
+  function spectralMetrics(full, grid) {
+    const idx = w => Math.round((w - grid.start) / grid.step);
+    const i0 = Math.ceil((900 - grid.start) / grid.step), i1 = Math.floor((1200 - grid.start) / grid.step) + 1;
+    const base = full[idx(3900)];
+    const res = [];
+    let fpMax = -Infinity;
+    for (let i = i0; i < i1; i++) {
+      let s = 0;
+      for (let k = 0; k < 11; k++) s += QC_KERNEL[k] * full[i - 5 + k];
+      res.push(full[i] - s);
+      fpMax = Math.max(fpMax, full[i]);
+    }
+    const mr = mean(res);
+    let minA = Infinity;
+    for (let i = idx(850); i < idx(3700); i++) minA = Math.min(minA, full[i] - base);
+    return { noise: Math.sqrt(res.reduce((a, v) => a + (v - mr) ** 2, 0) / res.length) * 1e3,
+      base, oh: full[idx(3300)] - base, fp: fpMax - base, minA };
+  }
+
+  // Dönüş: [{ level: "red" | "uyari" | "ok", item, value, rule }]
+  function checkQuality(model, full, meta) {
+    const q = model.qc, out = [];
+    const add = (level, item, value, rule) => out.push({ level, item, value, rule });
+    if (!q) return out;
+    const a = q.acquisition, s = q.spectral;
+    if (meta) {
+      add(a.units.includes(meta.units) ? "ok" : "red", "Veri birimi", meta.units, "Absorbans olmalı");
+      add(meta.resolution === null ? "uyari" : a.resolution.includes(meta.resolution) ? "ok" : "red", "Çözünürlük",
+        meta.resolution === null ? "okunamadı" : meta.resolution + " cm⁻¹", a.resolution.join(", ") + " cm⁻¹");
+      add(meta.scans < a.scans_min ? "red" : meta.scans < a.scans_typ ? "uyari" : "ok", "Örnek tarama sayısı", meta.scans,
+        `≥ ${a.scans_typ} (en az ${a.scans_min})`);
+      add(meta.bg_scans < a.bg_scans_min ? "red" : "ok", "Arka plan tarama sayısı", meta.bg_scans, `≥ ${a.bg_scans_min}`);
+      add(meta.accessory === null ? "uyari" : a.accessory.includes(meta.accessory) ? "ok" : "red", "Örnekleme aksesuarı",
+        meta.accessory || "okunamadı", a.accessory.join(", "));
+      add(meta.serial === null || a.serial.includes(meta.serial) ? "ok" : "uyari", "Cihaz seri no", meta.serial || "okunamadı",
+        a.serial.join(", ") + " (farklı cihazda model doğrulanmamıştır)");
+      add(meta.bg_age_min === null ? "uyari" : meta.bg_age_min > a.bg_age_max || meta.bg_age_min < 0 ? "red" : "ok", "Arka plan yaşı",
+        meta.bg_age_min === null ? "okunamadı" : meta.bg_age_min + " dk", `0–${a.bg_age_max} dk`);
+      add(meta.xmin <= a.xmin_max && meta.xmax >= a.xmax_min ? "ok" : "red", "Spektral aralık",
+        `${Math.round(meta.xmin)}–${Math.round(meta.xmax)} cm⁻¹`, `${a.xmin_max}–${a.xmax_min} cm⁻¹ kapsanmalı`);
+    } else {
+      add("uyari", "Ölçüm parametreleri", "doğrulanamadı", "Yalnızca .spa dosyalarında okunabilir");
+    }
+    if (full.slice(Math.round((850 - model.grid.start) / model.grid.step), Math.round((3700 - model.grid.start) / model.grid.step)).some(v => isNaN(v))) {
+      add("red", "Spektral aralık", "eksik", "850–3700 cm⁻¹ kapsanmalı");
+      return out;
+    }
+    const m = spectralMetrics(full, model.grid), f = (v, d = 3) => v.toFixed(d);
+    add(m.noise > s.noise.reject ? "red" : m.noise > s.noise.warn ? "uyari" : "ok", "Gürültü", f(m.noise, 2),
+      `uyarı > ${f(s.noise.warn, 1)}, red > ${f(s.noise.reject, 1)}`);
+    add(m.fp < s.fp.lo ? "red" : m.fp > s.fp.warn_hi ? "uyari" : "ok", "Parmak izi tepe yüksekliği", f(m.fp),
+      `≥ ${f(s.fp.lo)} (kristal teması); uyarı > ${f(s.fp.warn_hi)}`);
+    add(m.oh < s.oh.lo ? "red" : m.oh < s.oh.warn_lo || m.oh > s.oh.warn_hi ? "uyari" : "ok", "O–H bandı yüksekliği", f(m.oh),
+      `${f(s.oh.warn_lo)}–${f(s.oh.warn_hi)} (Brix); red < ${f(s.oh.lo)}`);
+    add(Math.abs(m.base) > s.base.abs_max ? "red" : "ok", "Baz çizgisi (3900 cm⁻¹)", f(m.base), `|A| ≤ ${f(s.base.abs_max)}`);
+    add(m.minA < s.minA.lo ? "red" : "ok", "En düşük absorbans", f(m.minA), `≥ ${f(s.minA.lo)} (arka plan hatası)`);
+    return out;
   }
 
   // ------------------------------------------------------------ ön işleme
@@ -222,11 +324,23 @@
   // ------------------------------------------------------------ karar ağacı
   const LABEL = { glikoz: "Glikoz şurubu", fruktoz: "Fruktoz şurubu", hurma: "Hurma konsantresi", uzum: "Üzüm konsantresi" };
 
-  function analyze(model, full) {
+  // meta: .spa başlığından ölçüm parametreleri (yoksa null). Herhangi bir "red" maddesi varsa sonuç verilmez.
+  function analyze(model, full, meta) {
     const r = { warnings: [], steps: [] };
-    const dom = predict(model.domain.model, prep(model.domain.pipeline, full));
-    r.domain = dom;
-    if (dom > 1) r.warnings.push("Spektrum eğitim verisindeki hiçbir örneğe benzemiyor (ölçüm hatası, farklı ürün ya da tanımsız adulterant olabilir). Sonuç güvenilir değil.");
+    r.qc = checkQuality(model, full, meta || null);
+    if (!r.qc.some(c => c.level === "red" && c.item === "Spektral aralık")) {
+      const dom = predict(model.domain.model, prep(model.domain.pipeline, full));
+      r.domain = dom;
+      r.qc.push({ level: dom > 1 ? "red" : "ok", item: "Eğitim verisine benzerlik", value: "f/f_kritik = " + dom.toFixed(2),
+        rule: "≤ 1 (aksi halde ölçüm hatası, farklı ürün ya da tanımsız adulterant)" });
+    }
+    r.qc.filter(c => c.level === "uyari").forEach(c => r.warnings.push(`${c.item}: ${c.value} (${c.rule})`));
+    if (r.qc.some(c => c.level === "red")) {
+      r.verdict = "reddedildi";
+      r.label = "Ölçüm reddedildi";
+      r.rejectReasons = r.qc.filter(c => c.level === "red").map(c => `${c.item}: ${c.value} — beklenen ${c.rule}`);
+      return r;
+    }
     const f = runTask(model, "T1_otantik", full);
     r.steps.push({ node: "T1_otantik", value: f });
     if (f <= 1) {
@@ -259,7 +373,7 @@
     return r;
   }
 
-  const api = { readSPA, readText, toGrid, prep, predict, runTask, analyze, LABEL };
+  const api = { readSPA, readText, toGrid, prep, predict, runTask, analyze, spectralMetrics, checkQuality, LABEL };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Engine = api;
 })(this);

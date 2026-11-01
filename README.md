@@ -16,9 +16,30 @@ spektrum
 ```
 
 Ek kontroller:
-- **Kapsam kontrolü:** spektrum eğitim verisindeki hiçbir örneğe benzemiyorsa uyarı verilir (ölçüm hatası, farklı ürün, tanımsız adulterant).
 - **Düşük güven:** sınıflandırma skoru, çapraz doğrulamada doğruluğun %80'in altına düştüğü bölgedeyse işaretlenir.
 - **Oran aralığı:** tahminle birlikte ±1,96·RMSEP (nested çapraz doğrulama) verilir.
+
+## Ölçüm uygunluk kontrolü
+
+Analizden önce her spektrum kontrol edilir; **red** maddesi olan ölçümlerde sonuç verilmez (numune yeniden ölçülmelidir).
+
+| Kontrol | Kaynak | Sonuç |
+|---|---|---|
+| Veri birimi (Absorbans), çözünürlük, örnek / arka plan tarama sayısı, ATR aksesuarı, arka plan yaşı, spektral aralık | `.spa` başlığı | red (tarama sayısı eğitimdekinden düşükse uyarı) |
+| Cihaz seri numarası | `.spa` başlığı | uyarı (model başka cihazda doğrulanmamıştır) |
+| Gürültü, parmak izi tepe yüksekliği (kristal teması), O–H bandı (Brix), baz çizgisi, negatif absorbans | spektrum | red / uyarı |
+| Eğitim verisine benzerlik (DD-SIMCA, α = 0,001) | spektrum | red |
+
+Kriterler eğitim verisinin ölçüm profilinden türetilir ve `model.json` içinde saklanır; model güncellendiğinde kriterler de güncellenir. `.tsv/.csv` dosyalarında ölçüm parametreleri okunamadığı için yalnızca spektral kontroller yapılır.
+
+## Model güncelleme
+
+- **Herkes için:** yeni `docs/model.json` dosyasını depoya gönderin; sayfa açıldığında yerleşik model olarak yüklenir.
+- **Yalnızca kendi tarayıcınızda:** sayfadaki *Yeni model yükle (.json)* düğmesiyle; yüklenen modeller tarayıcıda saklanır, *Kayıtlı modeller* listesinden sürümler arasında geçiş yapılabilir veya yerleşik modele dönülebilir. Yüklenen dosya yapısal olarak doğrulanır ve örnek bir spektrumla sınanır.
+
+## Rapor
+
+*Raporu PDF olarak kaydet* düğmesi yazdırma penceresini açar (hedef: "PDF olarak kaydet"). Rapor; tarih, analist, not, model sürümü, özet tablo ve her numune için ölçüm parametreleri, karar yolu, kontrol sonuçları ve uyarıları içerir. *CSV indir* aynı bilgileri tablo olarak verir.
 
 ## Desteklenen dosyalar
 
@@ -47,9 +68,10 @@ Spektrum en az 850–1800 cm⁻¹ aralığını kapsamalıdır (seçilen modelle
 ## Depo yapısı
 
 ```
-docs/          GitHub Pages: index.html, app.js, engine.js (hesap motoru), model.json (eğitilmiş modeller)
+docs/          GitHub Pages: index.html, app.js, engine.js (hesap motoru), model.json (eğitilmiş modeller + kabul kriterleri)
 train/         Model eğitimi (Python, PyTorch-ROCm GPU)
-  build_dataset.py   ham .spa/.tsv dosyalarından temiz veri seti
+  build_dataset.py   ham .spa/.tsv dosyalarından temiz veri seti (+ .spa ölçüm parametreleri)
+  spa_meta.py        .spa başlığından ölçüm parametrelerini okur
   search.py          nested LOFO ile ön işleme × teknik taraması (GPU)
   select_models.py   seçim, nested performans, uçtan uca değerlendirme, rapor
   export.py          seçilen modelleri docs/model.json'a yazar

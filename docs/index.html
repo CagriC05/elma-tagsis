@@ -9,14 +9,14 @@
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d2320; --muted: #5f6b66; --line: #dcdfd9;
   --accent: #2f6b4f; --accent-soft: #e3efe8; --warn: #9a5b00; --warn-soft: #fbf0dc;
   --bad: #a3322a; --bad-soft: #f8e4e1; --good: #2f6b4f; --good-soft: #e3efe8;
-  --plot-a: #2f6b4f; --plot-b: #b0b6b2;
+  --rej: #5b4a8a; --rej-soft: #ece8f6; --plot-a: #2f6b4f; --plot-b: #b0b6b2;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #141816; --panel: #1c211f; --ink: #e6ebe8; --muted: #9aa6a0; --line: #2e3532;
     --accent: #7cc4a0; --accent-soft: #1f3329; --warn: #e7b25c; --warn-soft: #33291a;
     --bad: #ec8a80; --bad-soft: #3a2220; --good: #7cc4a0; --good-soft: #1f3329;
-    --plot-a: #7cc4a0; --plot-b: #56605b;
+    --rej: #b7a6ec; --rej-soft: #2a2540; --plot-a: #7cc4a0; --plot-b: #56605b;
   }
 }
 * { box-sizing: border-box; }
@@ -27,14 +27,16 @@ h2 { font-size: 1.1rem; margin: 32px 0 12px; }
 h3 { font-size: 0.95rem; margin: 20px 0 8px; }
 .sub { color: var(--muted); margin: 0 0 20px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-#drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s; }
+#drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s; }
 #drop.over { border-color: var(--accent); background: var(--accent-soft); }
 #drop strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
 #drop span { color: var(--muted); font-size: 0.9rem; }
 .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0 8px; }
-button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-button:hover { border-color: var(--accent); }
+.bar input[type=text] { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 180px; }
+button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer; display: inline-block; }
+button:hover, .btn:hover { border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); }
 .scroll { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -45,7 +47,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
 .tag.ok { background: var(--good-soft); color: var(--good); }
 .tag.bad { background: var(--bad-soft); color: var(--bad); }
+.tag.rej { background: var(--rej-soft); color: var(--rej); }
 .tag.err { background: var(--warn-soft); color: var(--warn); }
+.tag.small { font-size: 0.75rem; padding: 0 6px; }
 .warn { color: var(--warn); font-size: 0.85rem; }
 .muted { color: var(--muted); }
 #detail { margin-top: 16px; display: none; }
@@ -59,25 +63,74 @@ svg text { fill: var(--muted); font-size: 11px; }
 .path small { color: var(--muted); }
 .big { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.01em; }
 .note { font-size: 0.85rem; color: var(--muted); }
-.heat td.num { font-size: 0.82rem; }
+.qc td:first-child { white-space: nowrap; }
+.lvl-red { color: var(--bad); font-weight: 600; }
+.lvl-uyari { color: var(--warn); font-weight: 600; }
+.lvl-ok { color: var(--good); }
 details summary { cursor: pointer; font-weight: 600; }
+#model-panel .row { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; justify-content: space-between; }
+#model-active b { font-size: 1rem; }
+#model-list td { vertical-align: middle; }
 footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
+#report { display: none; }
+
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  body { background: #fff; color: #000; font-size: 10.5pt; }
+  main { display: none; }
+  #report { display: block; }
+  #report h1 { font-size: 16pt; margin: 0 0 2mm; }
+  #report h2 { font-size: 12pt; margin: 6mm 0 2mm; border-bottom: 1px solid #999; padding-bottom: 1mm; }
+  #report h3 { font-size: 10.5pt; margin: 4mm 0 1mm; }
+  #report table { font-size: 9pt; page-break-inside: auto; }
+  #report th, #report td { padding: 1.2mm 2mm; border-bottom: 1px solid #ccc; color: #000; }
+  #report th { color: #333; }
+  #report .sample { page-break-inside: avoid; margin-bottom: 5mm; }
+  #report .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1mm 8mm; font-size: 9.5pt; }
+  #report .tag { border: 1px solid #000; background: none !important; color: #000 !important; }
+  #report .small { font-size: 8.5pt; color: #333; }
+  #report svg path:first-of-type { stroke: #999; }
+  #report svg path:last-of-type { stroke: #000; }
+}
 </style>
 </head>
 <body>
 <main>
   <h1>Elma Konsantresi Tağşiş Tespiti</h1>
-  <p class="sub">70 Brix elma konsantresi · FTIR-ATR spektrumu · OC-SIMCA → şurup / meyve konsantresi → tür → oran</p>
+  <p class="sub">70 Brix elma konsantresi · FTIR-ATR spektrumu · ölçüm kontrolü → OC-SIMCA → şurup / meyve konsantresi → tür → oran</p>
 
+  <section id="model-panel" class="panel">
+    <div class="row">
+      <div id="model-active">Model yükleniyor…</div>
+      <div class="bar" style="margin:0">
+        <label class="btn" for="model-file">Yeni model yükle (.json)</label>
+        <input id="model-file" type="file" accept=".json,application/json" hidden>
+        <button id="model-download">Etkin modeli indir</button>
+      </div>
+    </div>
+    <details id="model-manage" style="margin-top:10px">
+      <summary>Kayıtlı modeller</summary>
+      <p class="note">Yüklenen modeller yalnızca bu tarayıcıda saklanır. Modeli herkes için güncellemek için depodaki <code>docs/model.json</code> dosyasını değiştirin.</p>
+      <div class="scroll"><table id="model-list"></table></div>
+    </details>
+    <p id="model-msg" class="note" style="margin:8px 0 0"></p>
+  </section>
+
+  <h2>Analiz</h2>
   <label id="drop">
     <input id="file" type="file" multiple accept=".spa,.tsv,.csv,.txt" hidden>
     <strong>Spektrum dosyalarını buraya bırakın ya da tıklayıp seçin</strong>
-    <span>OMNIC .spa · iki sütunlu .tsv / .csv / .txt (dalga sayısı, absorbans) · matris CSV (ilk satır dalga sayıları). Dosyalar bilgisayarınızdan çıkmaz.</span>
+    <span>OMNIC .spa (ölçüm parametreleri de kontrol edilir) · iki sütunlu .tsv / .csv / .txt · matris CSV. Dosyalar bilgisayarınızdan çıkmaz.</span>
   </label>
   <p id="status" class="note"></p>
 
   <div class="bar">
-    <button id="csv" disabled>Sonuçları CSV indir</button>
+    <input id="analyst" type="text" placeholder="Analizi yapan">
+    <input id="note" type="text" placeholder="Not / numune bilgisi (rapora yazılır)">
+  </div>
+  <div class="bar">
+    <button id="pdf" class="primary" disabled>Raporu PDF olarak kaydet</button>
+    <button id="csv" disabled>CSV indir</button>
     <button id="clear" disabled>Temizle</button>
   </div>
   <div class="panel scroll">
@@ -100,6 +153,9 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
         <div id="d-warn"></div>
       </div>
     </div>
+    <h3>Ölçüm uygunluk kontrolü</h3>
+    <div class="scroll"><table id="d-qc" class="qc"></table></div>
+    <div id="d-meta" class="note"></div>
   </section>
 
   <h2>Modeller ve doğrulama</h2>
@@ -107,23 +163,20 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
     <p class="note" id="m-info"></p>
     <div class="scroll"><table id="m-table"></table></div>
     <h3>OC-SIMCA: tağşişli olarak işaretlenme oranı (nested LOFO)</h3>
-    <div class="scroll"><table id="m-t1" class="heat"></table></div>
+    <div class="scroll"><table id="m-t1"></table></div>
     <h3>Uçtan uca doğru sınıf oranı (nested LOFO)</h3>
-    <div class="scroll"><table id="m-e2e" class="heat"></table></div>
+    <div class="scroll"><table id="m-e2e"></table></div>
+    <h3>Ölçüm kabul kriterleri</h3>
+    <div class="scroll"><table id="m-qc"></table></div>
     <details style="margin-top:16px">
       <summary>Yöntem ve sınırlamalar</summary>
-      <ul class="note">
-        <li>Her düğüm için ön işleme (bölge × SNV/MSC/EMSC × Savitzky-Golay türevleri) ve teknik (PLS, PLS-DA, PCA-LDA, ridge, RBF çekirdek, kNN, MLP, 1D-CNN) kombinasyonları tarandı; seçim aile bazlı (leave-one-family-out) çapraz doğrulama ve 1-SE kuralıyla yapıldı.</li>
-        <li>Raporlanan performanslar nested LOFO'dur: test edilen partinin hiçbir örneği (ebeveyn elma dahil) model kurulumunda ve model seçiminde kullanılmamıştır.</li>
-        <li>OC-SIMCA kabul sınırı, eğitimde görülmemiş otantik örneklerin en az %95'i kabul edilecek şekilde seçildi.</li>
-        <li>Düşük tağşiş oranları ve özellikle fruktoz şurubu FTIR ile zor ayırt edilir; "otantik" kararı tağşiş olmadığını kanıtlamaz, yalnızca bu yöntemin tespit sınırının altında olduğunu gösterir.</li>
-        <li>Modeller tek bir laboratuvarın 2025 örnekleriyle ve her adulterantın sınırlı sayıda lotuyla kurulmuştur. Farklı cihaz, bölge, çeşit ya da adulterant lotlarında performans düşebilir. İki adulterantın karışımı modellenmemiştir.</li>
-      </ul>
+      <ul class="note" id="method"></ul>
     </details>
   </div>
 
-  <footer id="foot"></footer>
+  <footer id="foot">Hesaplamaların tamamı tarayıcınızda yapılır; yüklenen dosyalar hiçbir sunucuya gönderilmez.</footer>
 </main>
+<div id="report"></div>
 <script src="engine.js"></script>
 <script src="app.js"></script>
 </body>

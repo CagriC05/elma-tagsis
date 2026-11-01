@@ -27,6 +27,23 @@ if (raw) {
   const b = E.readSPA(new Uint8Array(fs.readFileSync(raw + ".spa")).buffer)[0];
   const ga = E.toGrid(a.x, a.y, M.grid), gb = E.toGrid(b.x, b.y, M.grid);
   let d = 0; ga.forEach((v, i) => { d = Math.max(d, Math.abs(v - gb[i])); });
-  console.log("SPA vs TSV ızgara farkı:", d.toExponential(2), "| karar:", E.analyze(M, ga).label);
+  console.log("SPA vs TSV ızgara farkı:", d.toExponential(2), "| karar:", E.analyze(M, ga, b.meta).label);
+}
+
+// spektral metrikler ve ölçüm kontrolü
+if (R.metrics) {
+  let md = 0;
+  R.X.forEach((x, i) => {
+    const m = E.spectralMetrics(Float64Array.from(x), M.grid);
+    for (const k of Object.keys(R.metrics)) md = Math.max(md, Math.abs(m[k] - R.metrics[k][i]) / (Math.abs(R.metrics[k][i]) + 1e-3));
+  });
+  console.log("spektral metrik farkı:", md.toExponential(2), md < 1e-6 ? "OK" : "HATA");
+  if (md >= 1e-6) fail++;
+}
+for (const f of process.argv.slice(3)) {
+  const s = E.readSPA(new Uint8Array(fs.readFileSync(f)).buffer)[0];
+  const r = E.analyze(M, E.toGrid(s.x, s.y, M.grid), s.meta);
+  console.log(path.basename(f), "→", r.label, r.level !== undefined ? "%" + r.level.toFixed(1) : "", "|", JSON.stringify(s.meta).slice(0, 220));
+  r.qc.filter(c => c.level !== "ok").forEach(c => console.log("    ", c.level, c.item, c.value, "|", c.rule));
 }
 process.exit(fail ? 1 : 0);

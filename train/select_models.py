@@ -17,6 +17,7 @@ MODEL_RANK = {"ddsimca": 0, "pls": 0, "pca_lda": 0, "ridge": 1, "knn": 2, "krr_r
 SCATTER_RANK = {"none": 0, "snv": 1, "msc": 2, "emsc": 3}
 DERIV_RANK = {"none": 0, "sg11": 0.5, "d1w11": 1, "d1w21": 1, "d2w15": 2, "d2w25": 2, "d3w21": 3, "d3w31": 3}
 CLASSES = ["otantik", "glikoz", "fruktoz", "hurma", "uzum"]
+SIMCA_KMAX = 4   # OC-SIMCA'da fazla PC görülmemiş ailelerin saf elmalarını da reddettiriyor (overfitting)
 
 
 def load_task(name):
@@ -55,10 +56,20 @@ def pick(scores, meta, kind, n):
     return min(cand, key=lambda i: (complexity(meta[i]), -s[i]))
 
 
-def oc_stats(f, y, mask):
+def oc_stats(f, y, mask, orgidx=None):
     acc = f <= 1
     a, d = mask & (y > 0), mask & (y < 0)
-    return dict(ozgulluk=acc[a].mean(), duyarlilik=(~acc[d]).mean())
+    out = dict(ozgulluk=acc[a].mean(), duyarlilik=(~acc[d]).mean())
+    if orgidx is not None:
+        has = d & (orgidx >= 0)
+        org_rows = np.unique(orgidx[orgidx >= 0])
+        out["ORG_kabul"] = acc[org_rows].mean()
+        out["kosullu_duyarlilik"] = (~acc[has] & acc[orgidx[has]]).mean()
+    return out
+
+
+def sc_free_val(f, y, ev, task):
+    return oc_stats(f, y, ev, task["orgidx"])["kosullu_duyarlilik"]
 
 
 def reg_stats(p, y):
@@ -82,6 +93,14 @@ def main():
         meta = [{k: v for k, v in r.items() if not (isinstance(v, float) and np.isnan(v))} for r in meta_df.to_dict("records")]
         kind, y, ev = task["kind"], task["y"], task["eval"]
         n_eff = (ev & (y < 0)).sum() if kind == "oc" else ev.sum()
+        if kind == "oc":
+            n_eff = (ev & (y < 0) & (task["orgidx"] >= 0)).sum()
+            free = pick(sc, meta, kind, n_eff)
+            kmask = np.array([m_.get("k", 0) <= SIMCA_KMAX for m_ in meta])
+            sc = np.where(kmask, sc, -np.inf)
+            inner = np.where(kmask[:, None], inner, -np.inf)
+            fs = oc_stats(lofo[free], y, ev)
+            print(f"{name}: serbest seçim (k sınırı yok): {meta[free]} LOFO {fs} koşullu skor {sc_free_val(lofo[free], y, ev, task):.3f}")
         sel_extra = {}
         # final seçim
         b = pick(sc, meta, kind, n_eff)
@@ -97,7 +116,7 @@ def main():
         nested_pred[name] = (npred, [meta[j] for j in chosen], dict(zip(folds["fams"], chosen)))
         m = ev
         if kind == "oc":
-            fin, nes = oc_stats(lofo[b], y, m), oc_stats(npred, y, m)
+            fin, nes = oc_stats(lofo[b], y, m, task["orgidx"]), oc_stats(npred, y, m, task["orgidx"])
         elif kind == "clf":
             fin, nes = dict(dengeli_dogruluk=ba(lofo[b][m], y[m])), dict(dengeli_dogruluk=ba(npred[m], y[m]))
         else:
@@ -109,7 +128,7 @@ def main():
                          nested_secim_cesitliligi=pd.Series([json.dumps(meta[j], sort_keys=True) for j in chosen]).nunique())
         clean = m & ~t["not"].str.contains("Düşük yoğunluk").to_numpy()
         if kind == "oc":
-            nes_c = oc_stats(npred, y, clean)
+            nes_c = oc_stats(npred, y, clean, task["orgidx"])
         elif kind == "clf":
             nes_c = dict(dengeli_dogruluk=ba(npred[clean], y[clean]))
         else:
