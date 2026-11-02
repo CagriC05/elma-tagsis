@@ -78,7 +78,7 @@ def sc_free_val(f, y, ev, task):
 
 
 def reg_stats(p, y):
-    e = p - y
+    e = np.clip(p, 0, None) - y          # uygulamadaki gibi: oran tahmini 0'ın altına inmez
     return dict(RMSEP=np.sqrt((e ** 2).mean()), bias=e.mean(), R2=1 - (e ** 2).sum() / ((y - y.mean()) ** 2).sum())
 
 
@@ -87,9 +87,20 @@ def ba(p, y):
     return np.mean([ok[y > 0].mean(), ok[y < 0].mean()])
 
 
+def qc_pass(t, X):
+    """Uygulamanın spektral ölçüm kontrolünden geçen örnekler (reddedilenler hiçbir modele ulaşmaz)."""
+    from export import qc_profile, spectral_metrics
+    m, q = spectral_metrics(X), qc_profile(t, X)["spectral"]
+    rej = (m["noise"] > q["noise"]["reject"]) | (m["oh"] < q["oh"]["lo"]) | (m["fp"] < q["fp"]["lo"]) | \
+          (np.abs(m["base"]) > q["base"]["abs_max"]) | (m["minA"] < q["minA"]["lo"])
+    return ~rej
+
+
 def main():
-    t, _ = load_data()
+    t, X = load_data()
     T = tasks(t)
+    qc_ok = qc_pass(t, X)
+    print(f"Değerlendirme: ölçüm kontrolünden geçen {qc_ok.sum()}/{len(t)} spektrum (reddedilenler: {', '.join(t.dosya[~qc_ok])})")
     fam = t.aile.to_numpy()
     lvl = t.oran_yuzde.to_numpy()
     sel, nested_pred, rows_top, rows_grid, perf = {}, {}, [], [], []
@@ -139,7 +150,7 @@ def main():
                 npred[rows] = lofo[j, rows]
                 chosen.append(j)
         nested_pred[name] = (npred, [meta[j] for j in chosen], dict(zip(folds["fams"], chosen)))
-        m = ev
+        m = ev & qc_ok                       # uygulamaya ulaşan örnekler
         if kind == "oc":
             fin, nes = oc_stats(lofo[b], y, m, task["orgidx"]), oc_stats(npred, y, m, task["orgidx"])
         elif kind == "clf":
@@ -151,17 +162,17 @@ def main():
                              nested_otantik_ort_tahmin=float(npred[m & (y == 0)].mean()))
         sel[name] = dict(config=meta[b], lofo_score=float(sc[b]), lofo=fin, nested=nes, **sel_extra,
                          nested_secim_cesitliligi=pd.Series([json.dumps(meta[j], sort_keys=True) for j in chosen]).nunique())
-        clean = m & ~t["not"].str.contains("Düşük yoğunluk").to_numpy()
+        allr = ev                            # karşılaştırma: ölçüm kontrolünde reddedilenler dahil
         if kind == "oc":
-            nes_c = oc_stats(npred, y, clean, task["orgidx"])
+            nes_c = oc_stats(npred, y, allr, task["orgidx"])
         elif kind == "clf":
-            nes_c = dict(dengeli_dogruluk=ba(npred[clean], y[clean]))
+            nes_c = dict(dengeli_dogruluk=ba(npred[allr], y[allr]))
         else:
-            nes_c = reg_stats(npred[clean], y[clean])
-        sel[name]["nested_dusuk_yogunluk_haric"] = nes_c
+            nes_c = reg_stats(npred[allr], y[allr])
+        sel[name]["nested_reddedilenler_dahil"] = nes_c
         perf.append(dict(gorev=name, **{f"secilen_{k}": v for k, v in meta[b].items() if k != "task"},
                          **{f"LOFO_{k}": v for k, v in fin.items()}, **{f"nested_{k}": v for k, v in nes.items()},
-                         **{f"nested_temiz_{k}": v for k, v in nes_c.items()},
+                         **{f"nested_reddedilenler_dahil_{k}": v for k, v in nes_c.items()},
                          **{f"nested_tagsisli_{k}": v for k, v in sel_extra.get("nested_tagsisli", {}).items()},
                          nested_farkli_secim=sel[name]["nested_secim_cesitliligi"], aday_sayisi=len(meta)))
         top = meta_df.assign(lofo_skor=sc).sort_values("lofo_skor", ascending=False).head(25)
@@ -181,6 +192,9 @@ def main():
     # ---- uçtan uca (nested)
     pred_cls, pred_lvl, zone = [], [], []
     for i in range(len(t)):
+        if not qc_ok[i]:                                # uygulamada ölçüm kontrolünde reddedilir
+            zone.append("ölçüm reddedildi"), pred_cls.append("ölçüm reddedildi"), pred_lvl.append(np.nan)
+            continue
         zone.append("tağşişli" if f1[i] > 1 else "şüpheli" if f1[i] > nested_suspect[i] else "otantik")
         if zone[-1] == "otantik":
             pred_cls.append("otantik"), pred_lvl.append(0.0)
@@ -209,6 +223,7 @@ def main():
     e2e["tahmin_oran"] = np.round(pred_lvl, 2)
     e2e["sinif_dogru"] = e2e.tahmin_sinif == e2e.sinif
     conf = pd.crosstab(e2e.sinif, e2e.tahmin_sinif)
+    e2e_all, e2e = e2e, e2e[qc_ok]                      # doğruluk tabloları: uygulamaya ulaşan örnekler
     acc_lvl = e2e.pivot_table(index="sinif", columns="oran_yuzde", values="sinif_dogru", aggfunc="mean").round(3)
     ok = e2e.sinif_dogru & (e2e.sinif != "otantik")
     reg_e2e = e2e[ok].groupby("sinif").apply(
@@ -225,12 +240,12 @@ def main():
         pd.DataFrame(perf).round(4).to_excel(w, sheet_name="Secilen_modeller", index=False)
         t1_level.to_excel(w, sheet_name="T1_seviye_duyarlilik")
         t1_level_s.to_excel(w, sheet_name="T1_seviye_supheli_dahil")
-        pd.crosstab(e2e.sinif, e2e.T1_bolge).to_excel(w, sheet_name="T1_bolgeler")
+        pd.crosstab(e2e_all.sinif, e2e_all.T1_bolge).to_excel(w, sheet_name="T1_bolgeler")
         acc_lvl.to_excel(w, sheet_name="UcUca_dogruluk_seviye")
         conf.to_excel(w, sheet_name="UcUca_karisiklik")
         reg_e2e.to_excel(w, sheet_name="UcUca_regresyon")
         lvl_mean.to_excel(w, sheet_name="UcUca_ort_tahmin_oran")
-        e2e.to_excel(w, sheet_name="UcUca_ornekler", index=False)
+        e2e_all.to_excel(w, sheet_name="UcUca_ornekler", index=False)
         pd.concat(rows_top).round(4).to_excel(w, sheet_name="Ilk25_konfig", index=False)
         pd.concat(rows_grid).round(4).to_excel(w, sheet_name="Teknik_x_donusum", index=False)
         for name in T:

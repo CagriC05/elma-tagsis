@@ -11,7 +11,6 @@ import numpy as np
 import torch
 from scipy.signal import savgol_coeffs
 from scipy.stats import chi2
-from sklearn.linear_model import LogisticRegression
 
 import gpu_models as gm
 from gpu_prep import GRID, Pipeline
@@ -192,15 +191,15 @@ def find_config(meta, cfg):
 
 
 def confidence_threshold(score, y, mask):
-    """|skor| eşiği: altında LOFO doğruluğu %80'in altına iner (lojistik kalibrasyon)."""
-    s, ok = np.abs(score[mask]), ((score[mask] > 0) == (y[mask] > 0)).astype(int)
-    if ok.mean() > 0.995 or ok.mean() < 0.005:
+    """|skor| eşiği: altında LOFO doğruluğu %80'in altında kalır (|skor| üzerinde artan izotonik kalibrasyon)."""
+    from sklearn.isotonic import IsotonicRegression
+    s, ok = np.abs(score[mask]), ((score[mask] > 0) == (y[mask] > 0)).astype(float)
+    o = np.argsort(s)
+    fit = IsotonicRegression(increasing=True).fit_transform(s[o], ok[o])
+    if fit[0] >= 0.8:
         return 0.0
-    lr = LogisticRegression().fit(s[:, None], ok)
-    a, b = lr.intercept_[0], lr.coef_[0, 0]
-    if b <= 0:
-        return 1e9   # hiçbir skor düzeyinde %80'e ulaşmıyor: her karar düşük güvenli
-    return float(min(1e9, max(0.0, (np.log(0.8 / 0.2) - a) / b)))
+    above = np.where(fit >= 0.8)[0]
+    return float(s[o][above[0]]) if len(above) else 1e9
 
 
 def main():
