@@ -15,7 +15,9 @@
     T4_hurma_uzum: "Hurma / üzüm", R_glikoz: "Oran: glikoz", R_fruktoz: "Oran: fruktoz", R_hurma: "Oran: hurma", R_uzum: "Oran: üzüm" };
   const TREE = Object.keys(NODE);
   const nodeName = k => (MODEL && MODEL.node_labels && MODEL.node_labels[k]) || NODE[k];
-  const productOf = m => (m && m.product) || "Ürün belirtilmemiş";
+  // Gıda bilgisi taşımayan eski modeller: şimdiye kadarki tüm modeller elma konsantresi için eğitildi
+  const LEGACY_PRODUCT = "Elma konsantresi (70 Brix)";
+  const productOf = m => (m && m.product) || LEGACY_PRODUCT;
   const LVL = { red: "Red", uyari: "Uyarı", ok: "Uygun" };
   const nv = (v, d) => v === null || v === undefined ? d : v;   // eski tarayıcılarda "nullish" operatörü yok
   const esc = s => String(nv(s, "")).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -84,7 +86,10 @@
     const want = store.get("activeModel");
     const pick = CATALOG.find(c => c.id === want) || CATALOG.find(c => c.id === "builtin" + ":model.json") || CATALOG[0];
     if (pick) setModel(pick);
-    else $("#model-active").innerHTML = '<span class="warn">Model bulunamadı. Bir model dosyası (.json) yükleyin.</span>';
+    else {
+      $("#product").innerHTML = "<option>Model bulunamadı</option>";
+      $("#model-active").innerHTML = '<span class="warn">Model bulunamadı. Bir model dosyası (.json) yükleyin.</span>';
+    }
     renderCatalog();
   }
 
@@ -132,6 +137,11 @@
     if (!f) return;
     try {
       const m = validate(JSON.parse(await f.text()));
+      if (!m.product) {
+        const ans = prompt("Bu model hangi gıda için? (ör. Elma konsantresi (70 Brix), Nar ekşisi)", LEGACY_PRODUCT);
+        if (ans === null) { $("#model-msg").textContent = "Model yükleme iptal edildi."; return; }
+        m.product = ans.trim() || LEGACY_PRODUCT;
+      }
       const rec = { id: "m" + Date.now(), name: f.name, added: new Date().toLocaleString("tr-TR"), model: m };
       await DB.put(rec).catch(() => { $("#model-msg").textContent = "Uyarı: model tarayıcıya kaydedilemedi; sayfa yenilenince kaybolur."; });
       const c = { id: rec.id, source: "yüklenen", product: productOf(m), version: m.version, name: rec.name, added: rec.added, model: m };
