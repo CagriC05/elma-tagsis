@@ -17,6 +17,12 @@ from gpu_prep import GRID, Pipeline
 from search import DEV, DT, OUT, load_data, tasks
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
+# Arayüzde gösterilen gıda adı ve etiketler (gıda seçimi bu alanlarla yapılır)
+PRODUCT = "Elma konsantresi (70 Brix)"
+LABELS = {"glikoz": "Glikoz şurubu", "fruktoz": "Fruktoz şurubu", "hurma": "Hurma konsantresi", "uzum": "Üzüm konsantresi"}
+NODE_LABELS = {"T1_otantik": "Otantiklik (OC-SIMCA)", "T2_surup_meyve": "Şurup / meyve konsantresi", "T3_glikoz_fruktoz": "Glikoz / fruktoz",
+               "T4_hurma_uzum": "Hurma / üzüm", "R_glikoz": "Oran: glikoz", "R_fruktoz": "Oran: fruktoz", "R_hurma": "Oran: hurma",
+               "R_uzum": "Oran: üzüm"}
 TREE = ["T1_otantik", "T2_surup_meyve", "T3_glikoz_fruktoz", "T4_hurma_uzum",
         "R_glikoz", "R_fruktoz", "R_hurma", "R_uzum"]
 
@@ -207,7 +213,7 @@ def main():
     T = tasks(t)
     sel = json.loads((OUT / "secim.json").read_text())
     Xt = torch.tensor(X, device=DEV, dtype=DT)
-    out = dict(version=datetime.date.today().isoformat(), grid=dict(start=float(GRID[0]), step=float(GRID[1] - GRID[0]), n=len(GRID)),
+    out = dict(product=PRODUCT, labels=LABELS, node_labels=NODE_LABELS, version=datetime.date.today().isoformat(), grid=dict(start=float(GRID[0]), step=float(GRID[1] - GRID[0]), n=len(GRID)),
                n_train=dict(otantik=int((t.sinif == "otantik").sum()), tagsisli=int((t.sinif != "otantik").sum()),
                             aile=int(t.aile.nunique())), tasks={})
     preds = {}

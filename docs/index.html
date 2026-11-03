@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Elma Konsantresi Tağşiş Tespiti</title>
+<title>Tağşiş Tespiti</title>
 <style>
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d2320; --muted: #5f6b66; --line: #dcdfd9;
@@ -96,11 +96,15 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
 </head>
 <body>
 <main>
-  <h1 style="margin-bottom:20px">Elma Konsantresi Tağşiş Tespiti</h1>
+  <h1 style="margin-bottom:20px">Tağşiş Tespiti</h1>
 
   <section id="model-panel" class="panel">
     <div class="row">
-      <div id="model-active">Model yükleniyor…</div>
+      <div style="flex:1 1 320px;min-width:0">
+        <label for="product" style="font-weight:600;display:block;margin-bottom:4px">Gıda / model</label>
+        <select id="product" style="font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);width:100%;max-width:520px"></select>
+        <div id="model-active" style="margin-top:6px">Model yükleniyor…</div>
+      </div>
       <div class="bar" style="margin:0">
         <label class="btn" for="model-file">Yeni model yükle (.json)</label>
         <input id="model-file" type="file" accept=".json,application/json" hidden>
@@ -108,7 +112,7 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
     </div>
     <details id="model-manage" style="margin-top:10px">
       <summary>Kayıtlı modeller</summary>
-      <p class="note">Yüklenen modeller yalnızca bu tarayıcıda saklanır. Modeli herkes için güncellemek için depodaki <code>docs/model.json</code> dosyasını değiştirin.</p>
+      <p class="note">Yüklenen modeller yalnızca bu tarayıcıda saklanır. Bir gıdanın modelini herkes için eklemek ya da güncellemek için model dosyasını depodaki <code>docs/</code> klasörüne koyup <code>docs/models.json</code> listesine ekleyin.</p>
       <div class="scroll"><table id="model-list"></table></div>
     </details>
     <p id="model-msg" class="note" style="margin:8px 0 0"></p>

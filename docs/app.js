@@ -3,7 +3,8 @@
   "use strict";
   const E = window.Engine;
   const $ = s => document.querySelector(s);
-  let MODEL = null, MODEL_INFO = null, BUILTIN = null, rows = [];
+  let MODEL = null, MODEL_INFO = null, rows = [];
+  let CATALOG = [];   // [{ id, source: "yerleşik" | "yüklenen", product, version, name, added, file?, model? }]
 
   const MODEL_NAME = { ddsimca: "DD-SIMCA", pls: "PLS", pca_lda: "PCA-LDA", ridge: "Ridge", krr_rbf: "RBF çekirdek (LS-SVM)",
     knn: "kNN", mlp: "MLP (ANN)", cnn: "1D-CNN" };
@@ -13,6 +14,8 @@
   const NODE = { T1_otantik: "Otantiklik (OC-SIMCA)", T2_surup_meyve: "Şurup / meyve konsantresi", T3_glikoz_fruktoz: "Glikoz / fruktoz",
     T4_hurma_uzum: "Hurma / üzüm", R_glikoz: "Oran: glikoz", R_fruktoz: "Oran: fruktoz", R_hurma: "Oran: hurma", R_uzum: "Oran: üzüm" };
   const TREE = Object.keys(NODE);
+  const nodeName = k => (MODEL && MODEL.node_labels && MODEL.node_labels[k]) || NODE[k];
+  const productOf = m => (m && m.product) || "Ürün belirtilmemiş";
   const LVL = { red: "Red", uyari: "Uyarı", ok: "Uygun" };
   const nv = (v, d) => v === null || v === undefined ? d : v;   // eski tarayıcılarda "nullish" operatörü yok
   const esc = s => String(nv(s, "")).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -64,54 +67,64 @@
     return m;
   }
 
+  // Yerleşik modeller: docs/models.json listesi (yoksa docs/model.json). Yüklenenler: IndexedDB.
   async function boot() {
-    try {
-      BUILTIN = await fetch("model.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
-    } catch (e) { BUILTIN = null; }
-    const active = store.get("activeModel");
-    const saved = await DB.all();
-    const rec = saved.find(r => r.id === active);
-    if (rec) setModel(rec.model, { source: "yüklenen", id: rec.id, name: rec.name, added: rec.added });
-    else if (BUILTIN) setModel(BUILTIN, { source: "yerleşik", id: "builtin" });
+    let manifest = [];
+    try { manifest = await fetch("models.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }); }
+    catch (e) { manifest = [{ file: "model.json" }]; }
+    const builtins = [];
+    for (const it of manifest) {
+      try {
+        const m = await fetch(it.file, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+        builtins.push({ id: "builtin:" + it.file, source: "yerleşik", file: it.file, product: it.product || productOf(m), version: m.version, model: m });
+      } catch (e) { /* listede olup bulunamayan dosya atlanır */ }
+    }
+    const saved = (await DB.all()).map(r => ({ id: r.id, source: "yüklenen", product: productOf(r.model), version: r.model.version, name: r.name, added: r.added, model: r.model }));
+    CATALOG = builtins.concat(saved);
+    const want = store.get("activeModel");
+    const pick = CATALOG.find(c => c.id === want) || CATALOG.find(c => c.id === "builtin" + ":model.json") || CATALOG[0];
+    if (pick) setModel(pick);
     else $("#model-active").innerHTML = '<span class="warn">Model bulunamadı. Bir model dosyası (.json) yükleyin.</span>';
-    renderModelList();
+    renderCatalog();
   }
 
-  function setModel(m, info) {
-    MODEL = m;
-    MODEL_INFO = info;
-    store.set("activeModel", info.id);
-    const n = m.n_train || {};
-    $("#model-active").innerHTML = `Etkin model: <b>${esc(m.version || "?")}</b> <span class="tag small ${info.source === "yerleşik" ? "ok" : "err"}">${info.source}</span>` +
-      (info.name ? ` <span class="muted">${esc(info.name)}</span>` : "") +
-      `<div class="note">Eğitim: ${nv(n.otantik, "?")} otantik, ${nv(n.tagsisli, "?")} tağşişli spektrum, ${nv(n.aile, "?")} aile` +
+  function setModel(c) {
+    MODEL = c.model;
+    MODEL_INFO = c;
+    store.set("activeModel", c.id);
+    const m = c.model, n = m.n_train || {};
+    $("#model-active").innerHTML = `<div class="note">Model sürümü ${esc(m.version || "?")} · <span class="tag small ${c.source === "yerleşik" ? "ok" : "err"}">${c.source}</span>` +
+      (c.name ? ` ${esc(c.name)}` : "") +
+      ` · eğitim: ${nv(n.otantik, "?")} otantik, ${nv(n.tagsisli, "?")} tağşişli spektrum, ${nv(n.aile, "?")} aile` +
       (m.qc ? ` · ölçüm dönemi ${esc(m.qc.acquisition.period.join(" – "))}` : " · <span class='warn'>bu modelde ölçüm kabul kriterleri yok</span>") + "</div>";
+    $("#product").value = c.id;
+    document.title = "Tağşiş Tespiti — " + productOf(m);
     rows.forEach(r => { if (r.full) analyzeRow(r); });
     render();
-    if ($("#detail").style.display === "block") $("#detail").style.display = "none";
+    $("#detail").style.display = "none";
   }
 
-  async function renderModelList() {
-    const saved = (await DB.all()).sort((a, b) => b.added.localeCompare(a.added));
-    const line = (id, ver, name, src, added) => `<tr><td><b>${esc(ver)}</b> <span class="muted">${esc(name || "")}</span></td><td>${src}</td><td>${esc(added || "")}</td>` +
-      `<td style="text-align:right;white-space:nowrap">${MODEL_INFO && MODEL_INFO.id === id ? '<span class="tag small ok">etkin</span>' : `<button data-use="${id}">Kullan</button>`}` +
-      (id !== "builtin" ? ` <button data-del="${id}">Sil</button>` : "") + "</td></tr>";
-    $("#model-list").innerHTML = "<thead><tr><th>Sürüm</th><th>Kaynak</th><th>Eklenme</th><th></th></tr></thead><tbody>" +
-      (BUILTIN ? line("builtin", BUILTIN.version, "", "yerleşik (depodaki docs/model.json)", "") : "") +
-      saved.map(r => line(r.id, r.model.version, r.name, "yüklenen", r.added)).join("") + "</tbody>";
-    $("#model-list").querySelectorAll("[data-use]").forEach(b => b.onclick = async () => {
-      const id = b.dataset.use;
-      if (id === "builtin") setModel(BUILTIN, { source: "yerleşik", id });
-      else { const r = (await DB.all()).find(x => x.id === id); setModel(r.model, { source: "yüklenen", id, name: r.name, added: r.added }); }
-      renderModelList();
-    });
+  // Gıda seçici (açılır liste) + kayıtlı modeller tablosu
+  function renderCatalog() {
+    const label = c => `${c.product} — ${c.version || "?"}${c.source === "yüklenen" ? " (yüklenen)" : ""}`;
+    $("#product").innerHTML = CATALOG.map(c => `<option value="${esc(c.id)}">${esc(label(c))}</option>`).join("");
+    if (MODEL_INFO) $("#product").value = MODEL_INFO.id;
+    $("#model-list").innerHTML = "<thead><tr><th>Gıda</th><th>Sürüm</th><th>Kaynak</th><th>Eklenme</th><th></th></tr></thead><tbody>" +
+      CATALOG.map(c => `<tr><td>${esc(c.product)}</td><td>${esc(c.version || "?")} <span class="muted">${esc(c.name || "")}</span></td>` +
+        `<td>${c.source === "yerleşik" ? "yerleşik (docs/" + esc(c.file) + ")" : "yüklenen"}</td><td>${esc(c.added || "")}</td>` +
+        `<td style="text-align:right;white-space:nowrap">${MODEL_INFO && MODEL_INFO.id === c.id ? '<span class="tag small ok">etkin</span>' : `<button data-use="${esc(c.id)}">Kullan</button>`}` +
+        (c.source === "yüklenen" ? ` <button data-del="${esc(c.id)}">Sil</button>` : "") + "</td></tr>").join("") + "</tbody>";
+    $("#model-list").querySelectorAll("[data-use]").forEach(b => b.onclick = () => { setModel(CATALOG.find(c => c.id === b.dataset.use)); renderCatalog(); });
     $("#model-list").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
       if (!confirm("Bu model bu tarayıcıdan silinsin mi?")) return;
       await DB.del(b.dataset.del);
-      if (MODEL_INFO.id === b.dataset.del && BUILTIN) setModel(BUILTIN, { source: "yerleşik", id: "builtin" });
-      renderModelList();
+      CATALOG = CATALOG.filter(c => c.id !== b.dataset.del);
+      if (MODEL_INFO.id === b.dataset.del && CATALOG.length) setModel(CATALOG[0]);
+      renderCatalog();
     });
   }
+
+  $("#product").addEventListener("change", e => { const c = CATALOG.find(x => x.id === e.target.value); if (c) { setModel(c); renderCatalog(); } });
 
   $("#model-file").addEventListener("change", async e => {
     const f = e.target.files[0];
@@ -121,9 +134,11 @@
       const m = validate(JSON.parse(await f.text()));
       const rec = { id: "m" + Date.now(), name: f.name, added: new Date().toLocaleString("tr-TR"), model: m };
       await DB.put(rec).catch(() => { $("#model-msg").textContent = "Uyarı: model tarayıcıya kaydedilemedi; sayfa yenilenince kaybolur."; });
-      setModel(m, { source: "yüklenen", id: rec.id, name: rec.name, added: rec.added });
-      renderModelList();
-      $("#model-msg").textContent = `"${f.name}" yüklendi ve etkinleştirildi (sürüm ${m.version || "?"}).`;
+      const c = { id: rec.id, source: "yüklenen", product: productOf(m), version: m.version, name: rec.name, added: rec.added, model: m };
+      CATALOG.push(c);
+      setModel(c);
+      renderCatalog();
+      $("#model-msg").textContent = `"${f.name}" yüklendi ve etkinleştirildi (${productOf(m)}, sürüm ${m.version || "?"}).`;
     } catch (err) {
       $("#model-msg").innerHTML = `<span class="warn">Model yüklenemedi: ${esc(err.message)}</span>`;
     }
@@ -199,7 +214,7 @@
       if (s.node === "T1_otantik") val = `f/f<sub>kritik</sub> = ${s.value.toFixed(3)} → ${s.value > 1 ? "red (tağşişli)" : s.suspect && s.value > s.suspect ? `şüpheli (şüphe eşiği ${s.suspect.toFixed(2)})` : "kabul (otantik)"}`;
       else if (t.kind === "clf") val = `skor = ${s.value.toFixed(3)}${s.low ? ' <span class="warn">düşük güven</span>' : ""}`;
       else val = `tahmin = %${s.value.toFixed(2)}`;
-      return `<li><b>${NODE[s.node]}</b>${val}<br><small>${MODEL_NAME[c.model]} · ${c.region} cm⁻¹ · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</small></li>`;
+      return `<li><b>${nodeName(s.node)}</b>${val}<br><small>${MODEL_NAME[c.model]} · ${c.region} cm⁻¹ · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</small></li>`;
     }).join("");
   }
 
@@ -307,14 +322,15 @@
           x.steps.map(s => {
             const c = MODEL.tasks[s.node].config, k = MODEL.tasks[s.node].kind;
             const v = s.node === "T1_otantik" ? `f/f_kritik = ${s.value.toFixed(3)} (${s.value > 1 ? "red" : s.suspect && s.value > s.suspect ? "şüpheli" : "kabul"})` : k === "clf" ? `skor ${s.value.toFixed(3)}${s.low ? " · düşük güven" : ""}` : `%${s.value.toFixed(2)}`;
-            return `<tr><td>${NODE[s.node]}</td><td>${v}</td><td class="small">${MODEL_NAME[c.model]} · ${c.region} · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</td></tr>`;
+            return `<tr><td>${nodeName(s.node)}</td><td>${v}</td><td class="small">${MODEL_NAME[c.model]} · ${c.region} · ${SCATTER[c.scatter]} · ${DERIV[c.deriv]}</td></tr>`;
           }).join("") + "</tbody></table>" : "") +
         `<p class="small"><b>Ölçüm kontrolü:</b> ${x.qc.filter(c => c.level === "ok").length}/${x.qc.length} uygun` +
         x.qc.filter(c => c.level !== "ok").map(c => ` · <b>${LVL[c.level]}</b> ${esc(c.item)} = ${esc(c.value)} (${esc(c.rule)})`).join("") + "</p>" +
         (x.warnings.length ? `<p class="small">Uyarılar: ${x.warnings.map(esc).join(" · ")}</p>` : "") + "</div>";
     }).join("");
     $("#report").innerHTML = `
-      <h1>Elma Konsantresi Tağşiş Tespiti — Analiz Raporu</h1>
+      <h1>Tağşiş Tespiti — Analiz Raporu</h1>
+      <p style="margin:0 0 3mm"><b>Gıda:</b> ${esc(productOf(MODEL))}</p>
       <div class="meta"><div><b>Rapor tarihi:</b> ${esc(now)}</div><div><b>Analizi yapan:</b> ${esc($("#analyst").value || "—")}</div>
         <div><b>Model sürümü:</b> ${esc(MODEL.version)} (${esc(MODEL_INFO.source)})</div><div><b>Not:</b> ${esc($("#note").value || "—")}</div>
         <div><b>Spektrum sayısı:</b> ${rows.length} (otantik ${count("otantik")}, şüpheli ${count("supheli")}, tağşişli ${count("tagsisli")}, reddedilen ölçüm ${count("reddedildi")})</div></div>
@@ -322,7 +338,7 @@
       <table><thead><tr><th>Dosya</th><th>Karar</th><th>Tür</th><th class="num">Oran</th><th>Uyarı / red nedeni</th></tr></thead><tbody>${summary}</tbody></table>
       <h2>Numune ayrıntıları</h2>${details}
       <h2>Yöntem ve sınırlamalar</h2><ul class="small">${METHOD.map(m => `<li>${esc(m)}</li>`).join("")}</ul>
-      <p class="small">Model doğrulama performansları (nested leave-one-family-out): ${Object.entries(MODEL.tasks).map(([k, t]) => `${NODE[k]}: ${perf(t)}`).join("; ")}.</p>`;
+      <p class="small">Model doğrulama performansları (nested leave-one-family-out): ${Object.entries(MODEL.tasks).map(([k, t]) => `${nodeName(k)}: ${perf(t)}`).join("; ")}.</p>`;
     window.print();
   };
 

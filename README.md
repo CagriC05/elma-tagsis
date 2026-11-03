@@ -1,6 +1,6 @@
-# Elma Konsantresi Tağşiş Tespiti (FTIR)
+# Tağşiş Tespiti (FTIR)
 
-70 Brix elma konsantresinin FTIR-ATR spektrumundan tağşiş tespiti yapan, **kurulum gerektirmeyen** tarayıcı uygulaması.
+FTIR-ATR spektrumundan tağşiş tespiti yapan, **kurulum gerektirmeyen** tarayıcı uygulaması. Gıda başına ayrı model kullanılır; şu an yerleşik model: **70 Brix elma konsantresi**.
 
 **Uygulama:** GitHub Pages adresi (depo ayarlarında *Pages* bölümünde görünür). Sayfayı açıp spektrum dosyalarını sürüklemek yeterlidir; hesaplamaların tamamı tarayıcıda yapılır, dosyalar hiçbir sunucuya gönderilmez.
 
@@ -35,9 +35,22 @@ Analizden önce her spektrum kontrol edilir; **red** maddesi olan ölçümlerde 
 
 Kriterler eğitim verisinin ölçüm profilinden türetilir ve `model.json` içinde saklanır; model güncellendiğinde kriterler de güncellenir. `.tsv/.csv` dosyalarında ölçüm parametreleri okunamadığı için yalnızca spektral kontroller yapılır.
 
+## Gıda / model seçimi
+
+Sayfanın üstündeki **Gıda / model** listesinden analiz edilecek gıdanın modeli seçilir; seçim tarayıcıda hatırlanır. Seçim değişince yüklü spektrumlar yeni modelle yeniden analiz edilir. Her `model.json` kendi gıda adını (`product`), adulterant etiketlerini (`labels`) ve düğüm adlarını (`node_labels`) taşır.
+
+**Yeni gıda eklemek:** modeli o gıdanın verisiyle eğitip (`train/export.py` içindeki `PRODUCT` / `LABELS` alanlarını düzenleyerek) çıkan dosyayı `docs/` klasörüne farklı bir adla koyun ve `docs/models.json` listesine ekleyin:
+
+```json
+[
+ {"file": "model.json", "product": "Elma konsantresi (70 Brix)"},
+ {"file": "model_nar.json", "product": "Nar ekşisi"}
+]
+```
+
 ## Model güncelleme
 
-- **Herkes için:** yeni `docs/model.json` dosyasını depoya gönderin; sayfa açıldığında yerleşik model olarak yüklenir.
+- **Herkes için:** ilgili model dosyasını `docs/` altında güncelleyin (yeni gıda ise `docs/models.json`'a ekleyin) ve depoya gönderin.
 - **Yalnızca kendi tarayıcınızda:** sayfadaki *Yeni model yükle (.json)* düğmesiyle; yüklenen modeller tarayıcıda saklanır, *Kayıtlı modeller* listesinden sürümler arasında geçiş yapılabilir veya yerleşik modele dönülebilir. Yüklenen dosya yapısal olarak doğrulanır ve örnek bir spektrumla sınanır.
 
 ## Rapor

@@ -421,7 +421,7 @@
     const [cls, low3] = grp === "surup" ? node("T3_glikoz_fruktoz", "glikoz", "fruktoz") : node("T4_hurma_uzum", "hurma", "uzum");
     r.group = grp;
     r.cls = cls;
-    r.label = (r.verdict === "supheli" ? "Şüpheli: olası " : "") + LABEL[cls];
+    r.label = (r.verdict === "supheli" ? "Şüpheli: olası " : "") + ((model.labels && model.labels[cls]) || LABEL[cls]);
     r.lowConfidence = low2 || low3;
     if (low2) r.warnings.push("Şurup / meyve konsantresi ayrımı düşük güvenli.");
     if (low3) r.warnings.push((grp === "surup" ? "Glikoz / fruktoz" : "Hurma / üzüm") + " ayrımı düşük güvenli.");
