@@ -14,7 +14,8 @@
     T4_hurma_uzum: "Hurma / üzüm", R_glikoz: "Oran: glikoz", R_fruktoz: "Oran: fruktoz", R_hurma: "Oran: hurma", R_uzum: "Oran: üzüm" };
   const TREE = Object.keys(NODE);
   const LVL = { red: "Red", uyari: "Uyarı", ok: "Uygun" };
-  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const nv = (v, d) => v === null || v === undefined ? d : v;   // eski tarayıcılarda "nullish" operatörü yok
+  const esc = s => String(nv(s, "")).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fmt = (v, d = 1) => v === null || v === undefined || isNaN(v) ? "—" : Number(v).toFixed(d);
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -83,7 +84,7 @@
     const n = m.n_train || {};
     $("#model-active").innerHTML = `Etkin model: <b>${esc(m.version || "?")}</b> <span class="tag small ${info.source === "yerleşik" ? "ok" : "err"}">${info.source}</span>` +
       (info.name ? ` <span class="muted">${esc(info.name)}</span>` : "") +
-      `<div class="note">Eğitim: ${n.otantik ?? "?"} otantik, ${n.tagsisli ?? "?"} tağşişli spektrum, ${n.aile ?? "?"} aile` +
+      `<div class="note">Eğitim: ${nv(n.otantik, "?")} otantik, ${nv(n.tagsisli, "?")} tağşişli spektrum, ${nv(n.aile, "?")} aile` +
       (m.qc ? ` · ölçüm dönemi ${esc(m.qc.acquisition.period.join(" – "))}` : " · <span class='warn'>bu modelde ölçüm kabul kriterleri yok</span>") + "</div>";
     rows.forEach(r => { if (r.full) analyzeRow(r); });
     render();
@@ -210,8 +211,8 @@
 
   function metaHTML(m) {
     if (!m) return "Ölçüm parametreleri: dosya .spa olmadığı için okunamadı.";
-    return `Ölçüm: ${esc(m.collected || "?")} · ${esc(m.title || "")} · ${esc(m.units)} · ${m.resolution ?? "?"} cm⁻¹ · ${m.scans} tarama (arka plan ${m.bg_scans}) · ` +
-      `arka plan yaşı ${m.bg_age_min ?? "?"} dk · ${esc(m.accessory || "?")} · cihaz ${esc(m.serial || "?")}`;
+    return `Ölçüm: ${esc(m.collected || "?")} · ${esc(m.title || "")} · ${esc(m.units)} · ${nv(m.resolution, "?")} cm⁻¹ · ${m.scans} tarama (arka plan ${m.bg_scans}) · ` +
+      `arka plan yaşı ${nv(m.bg_age_min, "?")} dk · ${esc(m.accessory || "?")} · cihaz ${esc(m.serial || "?")}`;
   }
 
   function verdictHTML(x) {
@@ -278,8 +279,8 @@
       const t1 = x.steps && x.steps[0] ? x.steps[0].value.toFixed(3) : "";
       const qc = x.qc || [];
       return [r.name, r.error ? "HATA: " + r.error : x.verdict, x.cls || "", x.level !== undefined ? x.level.toFixed(1) : "",
-        x.interval ? x.interval.toFixed(1) : "", x.lowConfidence ? "evet" : "", t1, m.collected || "", m.scans ?? "", m.resolution ?? "",
-        m.bg_age_min ?? "", m.accessory || "", m.serial || "",
+        x.interval ? x.interval.toFixed(1) : "", x.lowConfidence ? "evet" : "", t1, m.collected || "", nv(m.scans, ""), nv(m.resolution, ""),
+        nv(m.bg_age_min, ""), m.accessory || "", m.serial || "",
         qc.filter(c => c.level === "red").map(c => `${c.item}=${c.value}`).join(" | "),
         qc.filter(c => c.level === "uyari").map(c => `${c.item}=${c.value}`).join(" | "),
         MODEL.version, $("#analyst").value, $("#note").value].map(v => `"${String(v).replace(/"/g, '""')}"`).join(";");
@@ -329,7 +330,7 @@
   // ================================================================ model özeti
   function perf(t) {
     const n = t.perf.nested;
-    if (t.kind === "oc") return `özgüllük ${fmt(n.ozgulluk * 100, 0)}%, ORG kabul ${fmt((n.ORG_kabul ?? NaN) * 100, 0)}%`;
+    if (t.kind === "oc") return `özgüllük ${fmt(n.ozgulluk * 100, 0)}%, ORG kabul ${fmt((nv(n.ORG_kabul, NaN)) * 100, 0)}%`;
     if (t.kind === "clf") return `dengeli doğruluk ${fmt(n.dengeli_dogruluk * 100, 0)}%`;
     const a = t.perf.nested_tagsisli;
     return `RMSEP ${fmt(n.RMSEP, 2)}` + (a ? ` (tağşişlilerde ${fmt(a.RMSEP, 2)})` : "") + `, R² ${fmt(n.R2, 2)}`;

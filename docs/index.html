@@ -158,6 +158,19 @@ footer { margin-top: 40px; font-size: 0.82rem; color: var(--muted); }
   <footer id="foot">Hesaplamaların tamamı tarayıcınızda yapılır; yüklenen dosyalar hiçbir sunucuya gönderilmez.</footer>
 </main>
 <div id="report"></div>
+<div id="fatal" style="display:none;position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:#a3322a;color:#fff;font:14px/1.4 system-ui,sans-serif;z-index:9"></div>
+<script>
+  // Desteklenmeyen tarayıcı ya da beklenmedik hata: boş sayfa yerine görünür mesaj
+  (function () {
+    var box = document.getElementById("fatal");
+    function show(msg) { box.style.display = "block"; box.textContent = msg; }
+    var ok = window.fetch && window.Promise && window.indexedDB !== undefined && window.DataView && Array.prototype.find && window.Blob;
+    try { new Function("async () => { const a = `x`; for (const b of [1]) {} }"); } catch (e) { ok = false; }
+    if (!ok) show("Bu tarayıcı desteklenmiyor. Lütfen güncel Chrome, Edge ya da Firefox kullanın.");
+    window.addEventListener("error", function (e) { show("Uygulama hatası: " + (e.message || e) + " — sayfayı yenileyin; sürerse bu mesajın ekran görüntüsünü iletin."); });
+    window.addEventListener("unhandledrejection", function (e) { show("Uygulama hatası: " + ((e.reason && e.reason.message) || e.reason) + " — sayfayı yenileyin; sürerse bu mesajın ekran görüntüsünü iletin."); });
+  })();
+</script>
 <script src="engine.js"></script>
 <script src="app.js"></script>
 </body>
