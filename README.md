@@ -49,10 +49,11 @@ Kriterler eğitim verisinin ölçüm profilinden türetilir ve `model.json` içi
 | Biçim | Açıklama |
 |---|---|
 | `.spa` | Thermo OMNIC tek spektrum |
+| `.sp` | PerkinElmer (okunur; ancak model Thermo/Everest ATR verisiyle kurulduğu için ölçüm kontrolünde reddedilmesi beklenir) |
 | `.tsv` / `.csv` / `.txt` | İki sütun: dalga sayısı (cm⁻¹), absorbans. Başlık satırı, `;` `,` sekme ve ondalık virgül desteklenir |
 | Matris `.csv` | İlk satır dalga sayıları, sonraki her satır bir örnek (ilk sütun isteğe bağlı örnek adı) |
 
-Spektrum en az 850–1800 cm⁻¹ aralığını kapsamalıdır (seçilen modellere göre daha geniş olabilir).
+Biçim dosya uzantısından değil içeriğinden tanınır. Spektrum en az 850–3700 cm⁻¹ aralığını kapsamalıdır (seçilen modellere göre daha geniş olabilir).
 
 ## Modelleme
 

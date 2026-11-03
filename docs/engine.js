@@ -65,6 +65,64 @@
     return [{ name: null, x, y, meta }];
   }
 
+  // PerkinElmer .sp ("PEPE"): blok tabanlı; blok kimliği (uint16) + boyut (int32), ardından değişken kimliği.
+  // 35698: x başlangıç/bitiş (float64), 35701: nokta sayısı, 35708: veri (float64), 5104: ölçüm bilgileri.
+  function readPESP(buf) {
+    const dv = new DataView(buf), n = buf.byteLength;
+    const find = (block, varId) => {
+      for (let i = 44; i + 8 < n; i++)
+        if (dv.getUint16(i, true) === block && dv.getUint16(i + 6, true) === varId) return i + 8;
+      return -1;
+    };
+    const px = find(35698, 29981), pn = find(35701, 29995), pd = find(35708, 29974);
+    if (px < 0 || pn < 0 || pd < 0) throw new Error("PerkinElmer .sp dosyası çözülemedi");
+    const x0 = dv.getFloat64(px, true), x1 = dv.getFloat64(px + 8, true), npts = dv.getUint32(pn, true);
+    const x = new Float64Array(npts), y = new Float64Array(npts);
+    for (let i = 0; i < npts; i++) {
+      x[i] = x0 + (x1 - x0) * i / (npts - 1);
+      y[i] = dv.getFloat64(pd + 4 + 8 * i, true);
+    }
+    // Ölçüm bilgileri bloğu (kimlik 122): iç içe bloklar gezilerek bulunur (specio sp.py ile aynı yol).
+    // İçerik: '#u' metin, '$u' / ',u' tamsayı alanları; alan sırası specio'daki gibi.
+    const meta = { format: "PerkinElmer .sp", xmin: Math.min(x0, x1), xmax: Math.max(x0, x1), resolution: null, bg_age_min: null, collected: null,
+      units: null, scans: null, bg_scans: null, serial: null, accessory: null, title: null };
+    try {
+      let p = 44, id = dv.getUint16(p, true), size = dv.getInt32(p + 2, true);
+      p += 6;
+      const nbp = [p + size];
+      while (id !== 122 && p < n - 2) {
+        if (dv.getUint8(p + 1) === 117) { p = nbp.pop(); }
+        else { id = dv.getUint16(p, true); size = dv.getInt32(p + 2, true); p += 6; nbp.push(p + size); }
+      }
+      const end = Math.min(n, p + size), f = [];
+      let j = p;
+      while (j + 2 < end) {
+        const a = dv.getUint8(j), b = dv.getUint8(j + 1);
+        if (b === 117 && a === 35) { const L = dv.getInt16(j + 2, true); f.push(new TextDecoder().decode(new Uint8Array(buf, j + 4, Math.max(0, L)))); j += 4 + L + 6; }
+        else if (b === 117 && a === 36) { f.push(dv.getInt16(j + 2, true)); j += 4 + 6; }
+        else if (b === 117 && a === 44) { f.push(dv.getInt16(j + 2, true)); j += 4; }
+        else j++;
+      }
+      if (f.length > 32) {
+        const type = String(f[16]);
+        meta.units = /%T/.test(type) ? "%Transmittance" : /%R/.test(type) ? "%Reflectance" : /\(A\)|Abs/i.test(type) ? "Absorbance" : type;
+        meta.scans = f[9]; meta.bg_scans = f[32]; meta.serial = String(f[6]); meta.accessory = String(f[26]);
+        meta.title = `${f[5]} · ${f[2]}`;
+      }
+    } catch (e) { /* başlık okunamazsa yalnızca spektral kontroller uygulanır */ }
+    return [{ name: null, x, y, meta }];
+  }
+
+  // İçerikten biçim tanıma: uzantıdan bağımsız
+  function readAny(buf) {
+    const head = String.fromCharCode.apply(null, new Uint8Array(buf, 0, Math.min(64, buf.byteLength)));
+    if (head.startsWith("Spectral Data File")) return readSPA(buf);
+    if (head.startsWith("PEPE")) return readPESP(buf);
+    const bytes = new Uint8Array(buf, 0, Math.min(4096, buf.byteLength));
+    if (bytes.some(b => b === 0)) throw new Error("Desteklenmeyen dosya biçimi (desteklenenler: OMNIC .spa, PerkinElmer .sp, metin .tsv/.csv/.txt)");
+    return readText(new TextDecoder("utf-8").decode(buf));
+  }
+
   function parseNum(s) {
     s = s.trim();
     if (s.indexOf(",") >= 0 && s.indexOf(".") < 0) s = s.replace(",", ".");
@@ -147,18 +205,18 @@
     if (!q) return out;
     const a = q.acquisition, s = q.spectral;
     if (meta) {
-      add(a.units.includes(meta.units) ? "ok" : "red", "Veri birimi", meta.units, "Absorbans olmalı");
-      add(meta.resolution === null ? "uyari" : a.resolution.includes(meta.resolution) ? "ok" : "red", "Çözünürlük",
-        meta.resolution === null ? "okunamadı" : meta.resolution + " cm⁻¹", a.resolution.join(", ") + " cm⁻¹");
-      add(meta.scans < a.scans_min ? "red" : meta.scans < a.scans_typ ? "uyari" : "ok", "Örnek tarama sayısı", meta.scans,
+      add(meta.units == null ? "uyari" : a.units.includes(meta.units) ? "ok" : "red", "Veri birimi", meta.units == null ? "okunamadı" : meta.units, "Absorbans olmalı");
+      add(meta.resolution == null ? "uyari" : a.resolution.includes(meta.resolution) ? "ok" : "red", "Çözünürlük",
+        meta.resolution == null ? "okunamadı" : meta.resolution + " cm⁻¹", a.resolution.join(", ") + " cm⁻¹");
+      add(meta.scans == null ? "uyari" : meta.scans < a.scans_min ? "red" : meta.scans < a.scans_typ ? "uyari" : "ok", "Örnek tarama sayısı", meta.scans == null ? "okunamadı" : meta.scans,
         `≥ ${a.scans_typ} (en az ${a.scans_min})`);
-      add(meta.bg_scans < a.bg_scans_min ? "red" : "ok", "Arka plan tarama sayısı", meta.bg_scans, `≥ ${a.bg_scans_min}`);
-      add(meta.accessory === null ? "uyari" : a.accessory.includes(meta.accessory) ? "ok" : "red", "Örnekleme aksesuarı",
+      add(meta.bg_scans == null ? "uyari" : meta.bg_scans < a.bg_scans_min ? "red" : "ok", "Arka plan tarama sayısı", meta.bg_scans == null ? "okunamadı" : meta.bg_scans, `≥ ${a.bg_scans_min}`);
+      add(meta.accessory == null ? "uyari" : a.accessory.includes(meta.accessory) ? "ok" : "red", "Örnekleme aksesuarı",
         meta.accessory || "okunamadı", a.accessory.join(", "));
-      add(meta.serial === null || a.serial.includes(meta.serial) ? "ok" : "uyari", "Cihaz seri no", meta.serial || "okunamadı",
+      add(meta.serial == null || a.serial.includes(meta.serial) ? "ok" : "uyari", "Cihaz seri no", meta.serial || "okunamadı",
         a.serial.join(", ") + " (farklı cihazda model doğrulanmamıştır)");
-      add(meta.bg_age_min === null ? "uyari" : meta.bg_age_min > a.bg_age_max || meta.bg_age_min < 0 ? "red" : "ok", "Arka plan yaşı",
-        meta.bg_age_min === null ? "okunamadı" : meta.bg_age_min + " dk", `0–${a.bg_age_max} dk`);
+      add(meta.bg_age_min == null ? "uyari" : meta.bg_age_min > a.bg_age_max || meta.bg_age_min < 0 ? "red" : "ok", "Arka plan yaşı",
+        meta.bg_age_min == null ? "okunamadı" : meta.bg_age_min + " dk", `0–${a.bg_age_max} dk`);
       add(meta.xmin <= a.xmin_max && meta.xmax >= a.xmax_min ? "ok" : "red", "Spektral aralık",
         `${Math.round(meta.xmin)}–${Math.round(meta.xmax)} cm⁻¹`, `${a.xmin_max}–${a.xmax_min} cm⁻¹ kapsanmalı`);
     } else {
@@ -375,7 +433,7 @@
     return r;
   }
 
-  const api = { readSPA, readText, toGrid, prep, predict, runTask, analyze, spectralMetrics, checkQuality, LABEL };
+  const api = { readSPA, readPESP, readAny, readText, toGrid, prep, predict, runTask, analyze, spectralMetrics, checkQuality, LABEL };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Engine = api;
 })(this);

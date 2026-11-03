@@ -149,8 +149,7 @@
       $("#status").textContent = f.name + " işleniyor…";
       await new Promise(r => setTimeout(r, 0));
       try {
-        const isSpa = f.name.toLowerCase().endsWith(".spa");
-        const specs = isSpa ? E.readSPA(await f.arrayBuffer()) : E.readText(await f.text());
+        const specs = E.readAny(await f.arrayBuffer());
         specs.forEach((s, i) => {
           const r = { name: s.name || (specs.length > 1 ? `${f.name} #${i + 1}` : f.name), meta: s.meta || null,
             full: E.toGrid(s.x, s.y, MODEL.grid), time: new Date() };
